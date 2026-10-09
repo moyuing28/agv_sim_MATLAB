@@ -12,6 +12,6 @@ for t=1:height(tasks)
  rectangle('Position',[start a-0.35 duration 0.7],'FaceColor',colors(t,:),'EdgeColor','k');
  text(start+duration/2,a,sprintf('T%g',tasks.TaskID(t)),'HorizontalAlignment','center','FontSize',8);
 end
-yticks(1:cfg.numAGV); yticklabels(compose('AGV%d',1:cfg.numAGV)); ylim([0.5 cfg.numAGV+0.5]);
+yticks(1:cfg.numAGV); yticklabels(compose('AGV%02d',cfg.agvIDs)); ylim([0.5 cfg.numAGV+0.5]);
 xlabel('Time / s'); ylabel('AGV'); title(['Task schedule - ' label]); grid on;
 end

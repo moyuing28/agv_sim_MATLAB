@@ -1,0 +1,16 @@
+# Generated simulation outputs (main.m recreates this directory)
+/results/
+
+# MATLAB editor autosave, backup and compiled cache files
+*.asv
+*.m~
+*.mexw64
+slprj/
+*.slxc
+
+# Local editor and operating-system files
+/.vscode/
+/.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store

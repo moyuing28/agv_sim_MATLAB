@@ -1,5 +1,5 @@
 % Function: assignAGV
-% Purpose: Choose reachable AGV with earliest pickup arrival; tie by ID.
+% Purpose: Choose reachable AGV with earliest pickup arrival; tie by configured vehicle order.
 % Inputs: See function signature (main/config have no inputs).
 % Outputs: See function signature and README.
 %
@@ -13,7 +13,7 @@ for k=1:numel(agvs)
   arrival(k)=starts(k)+getTravelTime(distances(k),cfg);
  end
 end
-[value,id]=min(arrival); % Ties deterministically select lowest AGV ID.
+[value,id]=min(arrival); % Ties deterministically select first vehicle in configured order.
 if ~isfinite(value), id=0; startTime=NaN; emptyDistance=NaN; return; end
 startTime=starts(id); emptyDistance=distances(id);
 end

@@ -20,6 +20,7 @@ assert(numel(unique(key))==height(L),'AGV:DuplicateLaneSequence','Duplicate sequ
 report.uniqueStations=n; report.stationRows=height(s); report.pockets=numel(unique(L.PocketKey));
 report.nanCount=sum(isnan(D(:))); report.isolatedStations=marks(sum(isfinite(D),2)==1 & sum(isfinite(D),1)'==1);
 if nargin>=3
+ assert(numel(cfg.agvIDs)==cfg.numAGV && numel(unique(cfg.agvIDs))==cfg.numAGV && all(isfinite(cfg.agvIDs) & cfg.agvIDs>=0 & cfg.agvIDs==fix(cfg.agvIDs)),'AGV:Config','AGV IDs must be unique nonnegative integers, one per AGV.');
  assert(cfg.numAGV>=1 && cfg.numAGV==fix(cfg.numAGV) && numel(cfg.agvInitialStations)==cfg.numAGV,'AGV:Config','Invalid AGV configuration.');
  assert(all(ismember(cfg.agvInitialStations,marks)),'AGV:InitialStation','Unknown initial station.');
  assert(cfg.agvSpeed>0 && isfinite(cfg.agvSpeed) && cfg.meterPerUnit>0 && isfinite(cfg.meterPerUnit) && cfg.pickTime>=0 && isfinite(cfg.pickTime) && cfg.dropTime>=0 && isfinite(cfg.dropTime) && cfg.invalidCost>0 && isfinite(cfg.invalidCost),'AGV:Config','Invalid time, speed, scale or penalty.');

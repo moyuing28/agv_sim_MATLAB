@@ -16,7 +16,7 @@ catch err
 end
 base=struct('ID',0,'CurrentStation',0,'AvailableTime',0,'TotalTravelDistance',0,'TotalBusyTime',0,'TaskHistory',[]);
 agvs=repmat(base,1,cfg.numAGV);
-for a=1:cfg.numAGV, agvs(a).ID=a; agvs(a).CurrentStation=cfg.agvInitialStations(a); end
+for a=1:cfg.numAGV, agvs(a).ID=cfg.agvIDs(a); agvs(a).CurrentStation=cfg.agvInitialStations(a); end
 completed=false(1,n);
 for t=result.finalSequence
  pred=constraints(constraints(:,2)==t,1);
@@ -43,5 +43,6 @@ result.totalDistance=result.emptyDistance+result.loadedDistance;
 result.totalPickDropTime=n*(cfg.pickTime+cfg.dropTime);
 result.agvs=agvs;
 if result.makespan>0, result.agvUtilization=[agvs.TotalBusyTime]/result.makespan; end
-result.taskTable=table(tasks.TaskID,tasks.PickupStation,tasks.DropoffStation,result.assignedAGV,result.taskStartTime,result.taskFinishTime,'VariableNames',{'TaskID','Pickup','Dropoff','AGV','StartTime','FinishTime'});
+result.assignedAGVID=reshape(cfg.agvIDs(result.assignedAGV),[],1);
+result.taskTable=table(tasks.TaskID,tasks.PickupStation,tasks.DropoffStation,compose('AGV%02d',result.assignedAGVID),result.taskStartTime,result.taskFinishTime,'VariableNames',{'TaskID','Pickup','Dropoff','AGV','StartTime','FinishTime'});
 end

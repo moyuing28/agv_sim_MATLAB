@@ -28,9 +28,9 @@ OrderStationsDirection=DeepToEntrance；Sequence=0 是深处，数值越大越�
 每辆 AGV 保存 ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory（任务行索引）。不模拟连续位置、路径节点或每秒轨迹。完成任务后停在 Dropoff。等待不计 busy time；空载、Pick、载货、Drop 均计入 busy time。利用率=busy time/makespan。
 
 ## 8. Current AGV Assignment Rule
-assignAGV 对每辆车计算 start=max(predecessorReadyTime,ReleaseTime,AvailableTime)，arrival=start+emptyTravelTime；选择预计最早到达 Pickup 的车辆，并列选择最小 ID。固定分配规则不参与优化。
+assignAGV 对每辆车计算 start=max(predecessorReadyTime,ReleaseTime,AvailableTime)，arrival=start+emptyTravelTime；选择预计最早到达 Pickup 的车辆，并列选择配置排列中最靠前的车辆。固定分配规则不参与优化。
 仿真按修复后的优先列表串行安排时间，但不同车辆时间区间可以重叠。不存在随每次派单推进的全局完成时钟；无关巷道任务可以在 t=0 开始。
-**USER CONFIGURATION REQUIRED**：config.m 中 agvInitialStations=[6 6 6 6] 是可修改的示例，numAGV=4；实际实验须设置真实初始位置。所有速度、服务时间、种子、惩罚、绘图、输出目录和示例参数集中在 config.m。
+当前实际车辆配置：agvIDs=[2 3 4 5]，agvInitialStations=[2 4 0 3]，依次对应 AGV02→站点2、AGV03→站点4、AGV04→站点0、AGV05→站点3。每辆车独立记录状态，但速度、Pick/Drop 时间共用配置（同质车队）。result.assignedAGV 保留内部索引1:4；result.assignedAGVID、agvs.ID 使用实际车辆编号，分配表和图表显示 AGV02 等标签。并列时按配置排列优先；当前配置按实际 ID 升序。所有关键参数集中在 config.m。
 
 ## 9. Objective Function
 当前 evaluateSequence 返回 makespan，最小化 Cmax；第二输出可取得完整 result。不可行方案返回 invalidCost=1e12。后续目标扩展集中修改此接口，不能把优化算法写进模拟器。

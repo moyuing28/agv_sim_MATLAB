@@ -22,6 +22,8 @@ L=data.lanes(data.lanes.StationType=="Slot" & data.lanes.PocketKey==tasks.Lane(1
 sparseTasks=tasks(1:2,:); sparseTasks.PickupStation=[L.StationMark(end);L.StationMark(1)];
 assert(isequal(buildLaneConstraints(sparseTasks,data.lanes),[2 1]));
 r=simulateSchedule(1:height(tasks),tasks,data,cfg); assert(r.isFeasible);
+assert(isequal([r.agvs.ID],cfg.agvIDs));
+assert(isequal(r.assignedAGVID,reshape(cfg.agvIDs(r.assignedAGV),[],1)));
 for edge=r.constraints'
  assert(r.taskStartTime(edge(2))>=r.taskFinishTime(edge(1))-1e-10);
 end

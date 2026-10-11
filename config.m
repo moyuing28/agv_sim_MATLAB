@@ -17,7 +17,7 @@ cfg.randomSeed = 1;
 cfg.invalidCost = 1e12;
 cfg.enablePlots = true;
 cfg.verbose = true;
-cfg.exampleTaskCount = 15;
-cfg.exampleDropoffStation = 6;
+cfg.cargoFile = fullfile(cfg.projectRoot,'tasks','cargo_initial.csv');
+cfg.taskFile = fullfile(cfg.projectRoot,'tasks','tasks_input.csv');
 cfg.resultsDir = fullfile(cfg.projectRoot,'results');
 end

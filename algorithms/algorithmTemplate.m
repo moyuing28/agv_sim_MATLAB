@@ -8,6 +8,6 @@ function [bestSequence,bestFitness,history] = algorithmTemplate(tasks,data,cfg)
 % Replace candidate generation here with a future optimizer.
 bestSequence=fcfsSequence(tasks);
 [bestFitness,result]=evaluateSequence(bestSequence,tasks,data,cfg);
-bestSequence=result.finalSequence;
+if ~isempty(result.prioritySequence), bestSequence=result.prioritySequence; end
 history=bestFitness;
 end

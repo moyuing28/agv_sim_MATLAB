@@ -1,97 +1,113 @@
 # AGV Task Scheduling MATLAB Simulator
 
 ## 1. Project Goal
-本项目在固定底层导航距离下研究多 AGV **任务排序**，采用任务级离散事件时间计算。第一版只比较 FCFS 与 Random，不研究路径规划、实时避障、交通冲突、途中改派。
+在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前提供 FCFS、Random 和未来优化算法接口。
 
 ## 2. Original System
-原系统为 C# + ProfControl，GoTo 和底层导航由 ProfControl 处理。MATLAB 是独立仿真器，不调用实时控制系统。
+原系统 C# + ProfControl 负责真实 GoTo 和底层导航。MATLAB 是独立调度仿真器，导航可达不等于真实车辆 GoTo 可行性。
 
 ## 3. Exported Data
-原始文件均保留不改写：stations.csv 保存站点与 Pocket membership、坐标及标记；lanes.csv 保存 PocketKey、PocketName、Sequence、StationMark、StationType；distance_matrix.csv 是 FromStation,ToStation,Distance 长表；metadata.txt 保存导出来源及语义。
-站点表是每个站点/Pocket membership 一行，154 行对应 145 个唯一站点。不能把正常跨 Pocket 的重复 StationMark 当数据损坏；检查重复 membership，矩阵索引使用唯一 StationMark。
-PocketKey 必须作为字符串读取，支持带 #2 等后缀；PocketName 保留前导零。
+原始 stations.csv、lanes.csv、distance_matrix.csv、metadata.txt 只读。站点表每个 station/Pocket membership 一行，154 行对应 145 唯一站点；合法跨 Pocket membership 不作为重复站点错误。lanes 中 PocketKey/PocketName 以字符串读取，保留前导零与后缀。metadata 保存来源与导出语义。
 
 ## 4. Distance Model
-距离来自 ProfControl NavigationShortestPath（导航缓存或有向图 Dijkstra），不是车辆特定 GoTo 可行性。允许 D(i,j) != D(j,i)，禁止对称化。StationMark 不用作连续索引；stationMarks 与 stationToIndex 负责映射。
-当前按用户要求采用 meterPerUnit=0.01，即 100 map unit = 1 m。349 unit 在 1 m/s 下为 3.49 s。**metadata 标记 MetersConversion=Unconfirmed，该比例是实验假设，需要物理校准。** 坐标也是像素，不是米。
-Station 5 是孤立节点。NaN 保留原值，不补零、不补路径。loaded 路线不可达或所有 AGV 均无法空载到达时，调度不可行，makespan/fitness=invalidCost。某辆车不可达时允许选择其他可达车辆。
-内部 result 距离、AGV TotalTravelDistance 单位是原始 map unit；命令行输出乘配置比例转换为米。时间一律秒。时间换算只在 getTravelTime 中进行。
+距离来自 ProfControl NavigationShortestPath（导航缓存或有向图 Dijkstra）。D(i,j) 可以不等于 D(j,i)，禁止对称化。StationMark 通过 stationToIndex 映射，不直接作数组下标。NaN 保留，禁止填零或填路径。
+当前 meterPerUnit=0.01（100 map unit=1m）是用户指定实验假设；metadata 的 MetersConversion 仍为 Unconfirmed，需要校准。速度单位 m/s；getTravelTime 是唯一距离到秒的换算入口。内部距离为 map unit，控制台距离转成米。Station 5 孤立，不能用于存货；所有车无法空载到取货位时方案不可行。
 
 ## 5. Lane Model
-OrderStationsDirection=DeepToEntrance；Sequence=0 是深处，数值越大越接近入口。约束只使用 StationType=Slot，取货顺序 Entrance -> Deep，Slot Sequence 降序。Entrance 和 Unknown 保留结构信息，不作为 Pickup 任务；可作为 Dropoff 站点。
+Sequence=0 在深处，数值越大越靠近入口，OrderStationsDirection=DeepToEntrance。只有 Slot 可以存货和取放；Entrance、Unknown 仅为结构/导航信息。取货及放货都要求该货位外侧所有 Slot 无货。
+getSlotAccessStations 根据真实 PocketKey 与 Sequence 找外侧货位，不能把 PocketName 当唯一业务主键。货物表中的 PocketName/Sequence 是定位提示，启动时与真实 lanes 校验。
 
-## 6. Task Model
-任务 table 至少含 TaskID、PickupStation、DropoffStation、ReleaseTime。示例还含 Lane（PocketKey）、Sequence、Status（初始 Pending）。算法 sequence 使用**任务行索引 1:N**，不是 TaskID 或站点号。当前所有 ReleaseTime=0，属于静态排序。
-示例由真实 Slot 生成 15 个任务，配送到配置的站点 6；保证往返及初始车到 Pickup 可达，排除站点 5。这些仅为验证程序的测试任务，不代表正式实验任务。main 每次重新写 tasks/tasks_example.csv；正式任务可用 readtable 载入并替换 main 中生成任务的语句，随后调用 validateInputData。
+## 6. Manual Cargo and Task Inputs
+配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
 
-## 7. AGV Model
-每辆 AGV 保存 ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory（任务行索引）。不模拟连续位置、路径节点或每秒轨迹。完成任务后停在 Dropoff。等待不计 busy time；空载、Pick、载货、Drop 均计入 busy time。利用率=busy time/makespan。
+货物表 tasks/cargo_initial.csv 四列：StationMark,CargoID,PocketName,Sequence。列出 65 个 Slot，每个恰好一行。CargoID 空白表示空位，有值表示唯一货物；全部占用都必须填，包括不参与任务的障碍货。不能填字面值“空”，同名货物需加唯一编号。
+
+任务表 tasks/tasks_input.csv：TaskID,CargoID,DropoffStation,ReleaseTime。TaskID 是唯一整数；CargoID 必须存在于初始货物表，且整个任务集中每件货物只出现一次；目标只能是 Slot，不能与源站相同。ReleaseTime 是相对仿真开始的下发秒数，当前建议全部 0；实际开始不能早于下发。
+
+加载后 loadTaskConfiguration 根据 CargoID 推导 PickupStation，添加 TaskType=Transport、Status=Pending。输入表不包含起点，但运行表明确携带货物、起点和终点。
+
+**USER CONFIGURATION REQUIRED**：用户自行填写货物与任务。任务引用的 CargoID 若未配置，会明确报 AGV:MissingCargo，不会生成虚拟货物。若采用初始例子，可将 C001 填到站点12，C002填到站点110，目标10、21保持空；源站应按实际实验修改。两件货物直接互换占用的 Slot 时，本版全程预留目的地且要求目标在派单时为空，无法无缓冲交换，返回目标占用原因。
+
+## 7. Cargo, Slot and AGV State
+Slot：occupancy 为 CargoID 或空字符串；reservedBy 是预留该货位的任务行索引。
+Cargo：CargoID、CurrentStation、AGVID、Status；装车后站点为 NaN，状态 OnAGV；卸货后在目标 Slot，状态 AtSlot。
+AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory、CargoID、ActiveTask。容量固定一件，只有完整卸货后才能接新任务。AGV 连续位置未建模；CurrentStation 在取货/卸货事件更新，不代表行驶途中实时位置。
 
 ## 8. Current AGV Assignment Rule
-assignAGV 对每辆车计算 start=max(predecessorReadyTime,ReleaseTime,AvailableTime)，arrival=start+emptyTravelTime；选择预计最早到达 Pickup 的车辆，并列选择配置排列中最靠前的车辆。固定分配规则不参与优化。
-仿真按修复后的优先列表串行安排时间，但不同车辆时间区间可以重叠。不存在随每次派单推进的全局完成时钟；无关巷道任务可以在 t=0 开始。
-当前实际车辆配置：agvIDs=[2 3 4 5]，agvInitialStations=[2 4 0 3]，依次对应 AGV02→站点2、AGV03→站点4、AGV04→站点0、AGV05→站点3。每辆车独立记录状态，但速度、Pick/Drop 时间共用配置（同质车队）。result.assignedAGV 保留内部索引1:4；result.assignedAGVID、agvs.ID 使用实际车辆编号，分配表和图表显示 AGV02 等标签。并列时按配置排列优先；当前配置按实际 ID 升序。所有关键参数集中在 config.m。
+车辆为 AGV02→站点2、AGV03→站点4、AGV04→站点0、AGV05→站点3。速度及服务时间共用配置，车队同质。
+事件时刻扫描任务优先列表，找到可执行任务，在当前空闲车辆中使用 assignAGV 选择预计最早到达取货站的可达车辆；并列按配置排列。忙碌车辆不能提前接新任务。所有车忙碌时推进下一事件；无关巷道的任务可以并行。
+这与旧版为未来可用车辆预先排队的分配模型不同，算法比较始终使用同一个当前规则。
 
-## 9. Objective Function
-当前 evaluateSequence 返回 makespan，最小化 Cmax；第二输出可取得完整 result。不可行方案返回 invalidCost=1e12。后续目标扩展集中修改此接口，不能把优化算法写进模拟器。
+## 9. Objective Function and Encoding
+sequence 是任务表行索引 1:N 的完整排列，不是 CargoID、TaskID 或 StationMark。evaluateSequence 返回 makespan，第二输出完整 result；不可行方案返回 invalidCost，不伪造完成。
+prioritySequence 为拓扑修复后的优先列表；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。遗传编码应使用完整优先排列，不能拿失败结果的部分 finalSequence 当完整染色体。
 
-## 10. Constraints
-buildLaneConstraints(tasks,lanes) 输出 [predecessorTaskIndex,successorTaskIndex]，只在实际任务中匹配 Slot。缺少中间 Slot 时直接连接当前存在的相邻深度，例如 C -> A，不等待缺失 B。
-同一深度有多个任务时，外侧深度的所有任务必须完成后才释放下一深度所有任务；同一深度不强行互相排序。共享站点的多个 Pocket 的约束取并集，环被明确报错。
-repairSequence 是原排列优先级驱动的拓扑修复，保留每个任务恰好一次；重复/缺失/越界排列拒绝，约束环拒绝。checkTaskFeasible 只检查 predecessor 完成标记。
-时间语义采用用户要求的**整个前置任务完成（含 Drop）**后后续任务才能开始空载行驶。它比只要求先取走外侧货物更保守；若改为 Pickup 完成释放，必须同步更新代码、验证与本 README。taskPickupFinishTime 单独记录便于后续扩展。
+## 10. Constraints and Event Semantics
+buildLaneConstraints 仍生成同巷道现有取货任务的外→内前置边，并通过 repairSequence 修复。只有实际任务参与固定前置边；非任务货物的阻挡通过真实 occupancy 判断。前置任务全部卸货完成后后续取货任务才释放，这是保守业务规则。
+任务派单时必须：货物在源站、目标为空、源外侧无货、目标外侧无货、访问货位未被其他任务预留。若任务从外侧搬到同巷道内侧，源货物在放货前已取走，不视为它对自身目的地的阻挡。
+第一版保守预留源站、目标站和两端所有外侧 Slot，直到该任务卸货完成才释放。这样避免两车争抢空位、行驶期间新放入货物封堵访问，但会限制部分同巷道并行；这是货位访问资源规则，不是交通冲突模型。
+Dispatch：预留访问货位并标记 AGV 忙碌；不提前移动库存。
+Pickup：在空载行驶+Pick 完成时，源站变空，货物装上 AGV。
+Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释放预留。
+每个事件时刻先处理完成事件，再派单。任务暂不可执行时继续尝试其他任务；若有活动任务或未来 ReleaseTime，则推进事件。剩余任务无法推进时报告每个任务的占用/阻挡/可达原因，返回惩罚，不自动增加障碍货搬运任务。
+输入无效（货物缺失、重复、目标非 Slot 等）在 main 启动报明确错误；优化评估内的无效方案返回 penalty 和 failureReason。
 
 ## 11. MATLAB Project Structure
-- main.m：一键入口、种子、验证、两基线、命令行表、保存结果和图片。
-- config.m：无输入返回 cfg；集中配置。
-- data/loadSimulationData.m：cfg -> data，读取真实表和元数据。
-- data/buildDistanceMatrix.m：stations,rows -> D,marks,mapping，检查完整有向 From-To。
-- data/buildLaneConstraints.m：tasks,lanes -> 任务索引前置边。
-- data/validateInputData.m：data[,tasks,cfg] -> report，检查数据、配置、任务和环。
-- simulator/simulateSchedule.m：sequence,tasks,data,cfg -> result，修复、时间约束、分车、执行与统计。
-- simulator/evaluateSequence.m：上述输入 -> fitness[,result]，统一优化接口。
-- simulator/checkTaskFeasible.m：taskIndex,completedTasks,constraints -> logical。
-- simulator/repairSequence.m：sequence,constraints -> repairedSequence，稳定优先拓扑修复。
-- simulator/assignAGV.m：agvs,task,data,cfg,readyTime -> id,startTime,emptyDistance。
-- simulator/getTravelDistance.m：fromStation,toStation,data -> 原始有向距离。
-- simulator/getTravelTime.m：distance,cfg -> 秒，唯一距离到时间换算入口。
-- algorithms/fcfsSequence.m：tasks -> 输入行顺序。
-- algorithms/randomSequence.m：tasks -> randperm；仿真器统一修复。
-- algorithms/algorithmTemplate.m：tasks,data,cfg -> bestSequence,bestFitness,history，基线占位接口，不是优化算法。
-- tasks/generateExampleTasks.m：data,cfg -> 测试 table，并保存 tasks_example.csv。
-- visualization/plotGanttChart.m：result,tasks,cfg,label -> figure，空载开始至 Drop 完成并标 TaskID。
-- visualization/plotAGVUtilization.m：result,cfg,label -> figure，利用率百分比。
-- visualization/printSimulationSummary.m：results,names,tasks,cfg -> 控制台摘要和分配表。
-- tests/runTests.m：验证有向距离、单位、拓扑修复、并行时间、前置完成、不可达与原始文件完整性相关行为。
-- results/：运行日志、MAT 结果、任务分配 CSV、前置边 CSV、两种甘特图和利用率图。
+- main.m：读取手动输入、验证、两基线、输出。try/catch 保证失败时关闭 diary。
+- config.m：物理、车辆、输入路径、种子、日志/绘图输出配置。
+- data/loadSimulationData.m：读取真实原始导出。
+- data/buildDistanceMatrix.m：唯一站点映射与完整有向距离矩阵。
+- data/validateInputData.m：原始数据、车辆配置、任务路径与约束检查。
+- data/validateCargoConfiguration.m：所有 Slot、唯一货物、手动任务检查。
+- data/buildLaneConstraints.m：取货任务外→内前置边。
+- tasks/loadTaskConfiguration.m：只读加载两个 CSV，补起点和运行字段。
+- tasks/cargo_initial.csv：用户初始全部货位占用。
+- tasks/tasks_input.csv：用户正式搬运请求。
+- tasks/INPUT_GUIDE.md：填写规则。
+- tasks/generateExampleTasks.m、tasks/tasks_example.csv：旧站点运输示例，已停用，不适用于货物级模型。
+- simulator/initializeCargoState.m：每次评估创建独立初始库存，算法间互不污染。
+- simulator/getSlotAccessStations.m：找外侧 Slot。
+- simulator/checkCargoTaskFeasible.m：货物、目标容量、阻挡、预留检查，不含算法逻辑。
+- simulator/simulateSchedule.m：派单/Pickup/Dropoff 事件推进与输出。
+- simulator/evaluateSequence.m：统一优化目标接口。
+- simulator/repairSequence.m、checkTaskFeasible.m：优先拓扑修复、固定前置检查。
+- simulator/assignAGV.m：固定最早到达分车规则，调用方仅传当前空闲车辆。
+- simulator/getTravelDistance.m、getTravelTime.m：有向查距、时间换算。
+- algorithms/fcfsSequence.m、randomSequence.m：输入行顺序、随机完整排列。
+- algorithms/algorithmTemplate.m：未来算法输出 bestSequence,bestFitness,history 的占位模板。
+- visualization/：甘特图、利用率、摘要；只为可行方案绘图。
+- tests/runTests.m：真实地图与临时输入，验证库存和调度，不改用户输入。
 
-## 12. How to Run
-1. 打开 MATLAB（已在 R2022a 验证，无额外工具箱要求）。
-2. cd 到桌面 AGV_Simulation 文件夹。
-3. 运行 main 或 run('main.m')。
-运行会保留 workspace 中 cfg、data、tasks、constraints、resultFCFS、resultRandom。results/simulation_results.mat 可重新加载。图片同时显示并写出 PNG。验证测试：main 后运行 run('tests/runTests.m')。
+## 12. How to Run and Outputs
+先填写两张 CSV，再打开 MATLAB：
+~~~matlab
+cd('C:/Users/huhan/Desktop/AGV_Simulation')
+main
+~~~
+resultFCFS/resultRandom 保存 makespan、距离、时间、车辆分配、taskStatus、constraints、prioritySequence、finalSequence、taskTable、eventLog、finalSlotState、finalCargoState、agvs。
+result.assignedAGV 是内部车索引，assignedAGVID 是实际车号。
+results 中每种算法输出 *_tasks.csv、*_events.csv、*_slots.csv、*_cargo.csv、*_status.txt；可行时生成 *_gantt.png、*_utilization.png；保存 simulation_results.mat、precedence_constraints.csv、run_log.txt。每次覆盖同名输出，旧图可能来自上次可行运行，判断本次请先看 *_status.txt。results 不提交 Git。
+~~~matlab
+run('tests/runTests.m')
+~~~
+测试在 results 下生成临时 CSV，结束清除，不要求当前用户配置可行，不覆盖 cargo_initial.csv 或 tasks_input.csv。
 
 ## 13. How to Add a New Optimization Algorithm
-新算法放 algorithms，仅产生完整任务行索引排列，调用 evaluateSequence，不修改仿真器。可使用如下接口：
+仅生成完整任务索引排列，调用 evaluateSequence。不可行结果参与 penalty 评价。不要把算法写进仿真器；不要自动增加用户任务或改输入文件。
 ~~~matlab
-function [bestSequence,bestFitness,history] = newAlgorithm(tasks,data,cfg)
 candidate = randperm(height(tasks));
 [fitness,result] = evaluateSequence(candidate,tasks,data,cfg);
-bestSequence = result.finalSequence;
-bestFitness = fitness;
-history = fitness;
-end
 ~~~
-算法专属参数也集中放配置。evaluateSequence 的修复可能让不同染色体得到同一合法序列，实验应记录修复后序列及随机种子。
+动态占用与阻挡会让不同优先级产生不同派单顺序或可行性；不能假设只做一次拓扑排序即可保证可行。
 
 ## 14. Known Assumptions
-静态有向最短距离；固定车速和 Pick/Drop 时间；不考虑实时路径冲突、避障、载重差异、充电、容量竞争、加减速。当前只优化任务排序，分车规则固定。共享配送站点没有容量约束。前置任务 Drop 完成后释放后续任务。
+固定有向距离、速度、Pick/Drop 时间；每 Slot 一件货，每 AGV 一件货；任务集每 CargoID 一次。无充电、实时交通、重量差异、额外临时挪货。访问货位全程保守预留；前置任务 Drop 完成释放后续任务。输入中的占用是真实初始状态，未列货名表示空位。
 
 ## 15. Known Data Notes
-145 unique stations；154 station membership rows；34 physical pockets；21025 directed pairs；NaN count=288；Station 5 isolated（对角为零，其他进出均 NaN）。Unknown 不作为 Slot。NaN 是已知导出信息，正常运行打印统计，不需要产生 warning。
+145 unique stations、154 membership rows、34 physical pockets、65 unique Slots、21025 directed pairs、288 NaN；Station 5 isolated。Sequence=0 deepest，货物 CSV 按巷道名称与深度升序方便填写。
 
 ## 16. Future Work
-GA、GWO、SA、ACO、禁忌搜索等；动态插单、多目标、AGV 分配联合优化、动态交通冲突。第一版不实现这些算法或交通功能。
+GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障碍货搬运应由独立模块生成临时任务，届时可放宽正式任务/临时任务的货物重复规则，并动态更新货物位置和未执行任务起点；不能把初始起点写死到未来任务。
 
 ## 17. AI Modification Guidelines
-修改前先读 README；禁止对称化/删除有向距离，禁止把 Unknown 当 Slot，禁止把 StationMark 当连续下标，禁止修改原始 CSV 或擅自填 NaN。所有参数优先放 config，新算法放 algorithms，仿真器与算法解耦。改变关键假设时同步 README 与相关测试。按真实表头适配读取，保留 PocketKey 字符串及合法重复站点 membership。禁止用派单顺序替代实际完成时刻来判断前置约束。
+先读 README。禁止修改原始 CSV 或用户手动输入、对称化距离、填 NaN、把 Unknown 当 Slot、用站点号直接索引。参数放 config；算法解耦；修改货位预留/事件时间/容量/任务规则同步文档和测试。原始 metadata 与用户物理比例假设保持区分。新增临时搬运之前不能伪造障碍货已被移走。

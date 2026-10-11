@@ -31,6 +31,9 @@ if nargin>=2 && ~isempty(tasks)
  assert(all(isfinite(tasks.ReleaseTime) & tasks.ReleaseTime>=0),'AGV:ReleaseTime','Invalid release time.');
  slots=L.StationMark(L.StationType=="Slot");
  assert(all(ismember(tasks.PickupStation,slots)),'AGV:PickupType','Pickup must be a Slot.');
+ assert(all(ismember(tasks.DropoffStation,slots)),'AGV:DropoffType','Dropoff must be a Slot; Entrance/Unknown cannot store cargo.');
+ assert(isfield(data,'cargoInitial'),'AGV:CargoConfiguration','Missing cargo initial configuration.');
+ validateCargoConfiguration(data.cargoInitial,tasks,data);
  for k=1:height(tasks)
   assert(isfinite(getTravelDistance(tasks.PickupStation(k),tasks.DropoffStation(k),data)),'AGV:UnreachableTask','Task %g loaded route is unreachable.',tasks.TaskID(k));
  end

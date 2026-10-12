@@ -32,6 +32,9 @@ try
   fid=fopen(fullfile(cfg.resultsDir,[prefix '_status.txt']),'w');
   assert(fid>=0,'AGV:OutputFile','Cannot write result status.');
   fprintf(fid,'Feasible=%d\nMakespan=%.6f\n%s\n',r.isFeasible,r.makespan,r.failureReason); fclose(fid);
+  if cfg.enableAnimation && isfield(r,'taskTable')
+   exportScheduleAnimation(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.html']));
+  end
   if cfg.enablePlots && r.isFeasible
    f=plotGanttChart(r,tasks,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_gantt.png']));
    f=plotAGVUtilization(r,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_utilization.png']));

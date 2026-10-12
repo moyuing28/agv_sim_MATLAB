@@ -109,5 +109,13 @@ candidate = randperm(height(tasks));
 ## 16. Future Work
 GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障碍货搬运应由独立模块生成临时任务，届时可放宽正式任务/临时任务的货物重复规则，并动态更新货物位置和未执行任务起点；不能把初始起点写死到未来任务。
 
+### 任务时序动画
+
+运行 `main` 后，`results/fcfs_animation.html` 和 `results/random_animation.html` 可直接用浏览器离线打开。通过 `config.m` 的 `enableAnimation` 开关导出，`animationSpeed` 设置每秒播放推进的仿真秒数（默认 5）。支持播放/暂停、倍速、拖动时间、回到开始和下一事件，包含站点、AGV、全部初始货物、装卸进度、同步时间轴及任务明细。
+
+站点按巷道分组，站点间连线仅表示任务运输关系；车辆在连线上按真实任务阶段时长插值移动，不表示实际导航路径或真实比例。货物在 Pickup 完成时离开源站，在 Dropoff 完成时进入目标站，与仿真库存事件一致。未参与任务的货物也会显示。受阻方案显示原因且仅回放已派单工作，不使用 penalty makespan 作为动画时长，不伪造任务完成。
+
+`run('tests/runTests.m')` 会额外生成 `results/animation_demo.html`，使用隔离测试数据演示并行运输；该文件不是当前用户输入的调度结果。输入 CSV 不会被修改。
+
 ## 17. AI Modification Guidelines
 先读 README。禁止修改原始 CSV 或用户手动输入、对称化距离、填 NaN、把 Unknown 当 Slot、用站点号直接索引。参数放 config；算法解耦；修改货位预留/事件时间/容量/任务规则同步文档和测试。原始 metadata 与用户物理比例假设保持区分。新增临时搬运之前不能伪造障碍货已被移走。

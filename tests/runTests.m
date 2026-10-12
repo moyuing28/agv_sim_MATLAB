@@ -31,6 +31,7 @@ assert(isequal([r.agvs.ID],testCfg.agvIDs)); verifyEvents(r,data,testCfg);
 assert(r.finalSlotState.CargoID(r.finalSlotState.StationMark==10)=="C001");
 assert(r.finalSlotState.CargoID(r.finalSlotState.StationMark==21)=="C002");
 fig=plotGanttChart(r,tasks,testCfg,'Cargo model validation'); saveas(fig,fullfile(testCfg.resultsDir,'cargo_test_gantt.png')); close(fig);
+exportScheduleAnimation(r,tasks,data,testCfg,'TEST DEMO / 隔离测试数据',fullfile(testCfg.resultsDir,'animation_demo.html'));
 [f,bad]=evaluateSequence(1,tasks,data,testCfg); assert(f==testCfg.invalidCost && ~bad.isFeasible);
 [f,bad]=evaluateSequence([1 1],tasks,data,testCfg); assert(f==testCfg.invalidCost && ~bad.isFeasible);
 isolated=testCfg; isolated.agvInitialStations=repmat(5,1,testCfg.numAGV);
@@ -92,6 +93,8 @@ expectError(@()loadFixture(cargo,taskInput("ONE",6),testData,testCfg),'AGV:Dropo
 expectError(@()loadFixture(cargo,taskInput(["ONE" "ONE"],[10 21]),testData,testCfg),'AGV:RepeatedCargoTask');
 [tasks,data]=loadFixture(blank,taskInput(strings(0,1),zeros(0,1)),testData,testCfg);
 r=simulateSchedule([],tasks,data,testCfg); assert(r.isFeasible && r.makespan==0);
+exportScheduleAnimation(r,tasks,data,testCfg,'Empty schedule',fullfile(fixtureDir,'empty_animation.html'));
+assert(isfile(fullfile(fixtureDir,'empty_animation.html')));
 clear fixtureCleanup;
 fprintf('All cargo/event scheduling tests passed.\n');
 

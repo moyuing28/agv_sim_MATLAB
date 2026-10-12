@@ -1,6 +1,11 @@
 # Generated simulation outputs (main.m recreates this directory)
 /results/
 
+# Generated animation pages, even when exported outside results.
+*_animation.html
+animation_demo.html
+# visualization/scheduleAnimation.html is a source template and must be committed.
+
 # MATLAB editor autosave, backup and compiled cache files
 *.asv
 *.m~

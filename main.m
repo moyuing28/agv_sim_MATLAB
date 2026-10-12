@@ -35,6 +35,9 @@ try
   if cfg.enableAnimation && isfield(r,'taskTable')
    exportScheduleAnimation(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.html']));
   end
+  if cfg.enableAnimationGIF && isfield(r,'taskTable')
+   exportScheduleGIF(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.gif']));
+  end
   if cfg.enablePlots && r.isFeasible
    f=plotGanttChart(r,tasks,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_gantt.png']));
    f=plotAGVUtilization(r,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_utilization.png']));

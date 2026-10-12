@@ -32,6 +32,22 @@ assert(r.finalSlotState.CargoID(r.finalSlotState.StationMark==10)=="C001");
 assert(r.finalSlotState.CargoID(r.finalSlotState.StationMark==21)=="C002");
 fig=plotGanttChart(r,tasks,testCfg,'Cargo model validation'); saveas(fig,fullfile(testCfg.resultsDir,'cargo_test_gantt.png')); close(fig);
 exportScheduleAnimation(r,tasks,data,testCfg,'TEST DEMO / 隔离测试数据',fullfile(testCfg.resultsDir,'animation_demo.html'));
+% GIF uses exact pickup/dropoff events and writes the requested frame dimensions.
+payload=buildAnimationData(r,tasks,data,testCfg,'GIF validation');
+first=payload.tasks(1);
+before=animationStateAt(payload,first.pickupFinish-1e-6);
+loaded=animationStateAt(payload,first.pickupFinish);
+c=find(strcmp({loaded.cargo.id},first.cargo));
+assert(~before.cargo(c).onboard && loaded.cargo(c).onboard);
+finished=animationStateAt(payload,payload.duration);
+assert(finished.completed==height(tasks) && ~any([finished.cargo.onboard]));
+assert(finished.cargo(c).station==first.dropoff);
+backward=animationStateAt(payload,0); assert(~any([backward.cargo.onboard]));
+gifCfg=testCfg; gifCfg.gifFPS=2; gifCfg.gifMaxDuration=0.5; gifCfg.gifResolution=[640 360];
+gifFile=fullfile(fixtureDir,'validation.gif');
+exportScheduleGIF(r,tasks,data,gifCfg,'GIF validation',gifFile);
+gifInfo=imfinfo(gifFile);
+assert(numel(gifInfo)>=2 && gifInfo(1).Width==640 && gifInfo(1).Height==360);
 [f,bad]=evaluateSequence(1,tasks,data,testCfg); assert(f==testCfg.invalidCost && ~bad.isFeasible);
 [f,bad]=evaluateSequence([1 1],tasks,data,testCfg); assert(f==testCfg.invalidCost && ~bad.isFeasible);
 isolated=testCfg; isolated.agvInitialStations=repmat(5,1,testCfg.numAGV);
@@ -95,6 +111,9 @@ expectError(@()loadFixture(cargo,taskInput(["ONE" "ONE"],[10 21]),testData,testC
 r=simulateSchedule([],tasks,data,testCfg); assert(r.isFeasible && r.makespan==0);
 exportScheduleAnimation(r,tasks,data,testCfg,'Empty schedule',fullfile(fixtureDir,'empty_animation.html'));
 assert(isfile(fullfile(fixtureDir,'empty_animation.html')));
+emptyGIF=fullfile(fixtureDir,'empty.gif');
+exportScheduleGIF(r,tasks,data,gifCfg,'Empty schedule',emptyGIF);
+assert(numel(imfinfo(emptyGIF))==1);
 clear fixtureCleanup;
 fprintf('All cargo/event scheduling tests passed.\n');
 

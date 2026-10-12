@@ -4,6 +4,8 @@
 # Generated animation pages, even when exported outside results.
 *_animation.html
 animation_demo.html
+*_animation.gif
+animation_demo.gif
 # visualization/scheduleAnimation.html is a source template and must be committed.
 
 # MATLAB editor autosave, backup and compiled cache files

@@ -117,5 +117,13 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 `run('tests/runTests.m')` 会额外生成 `results/animation_demo.html`，使用隔离测试数据演示并行运输；该文件不是当前用户输入的调度结果。输入 CSV 不会被修改。
 
+### PPT 用 GIF 动图
+
+`main` 同时生成 `results/fcfs_animation.gif` 和 `results/random_animation.gif`。在 PowerPoint 中选择“插入 → 图片 → 此设备”，选择 GIF，进入幻灯片放映即可播放。GIF 是循环播放的固定动画，不包含 HTML 播放控件。
+
+配置集中在 `config.m`：`enableAnimationGIF` 控制导出；`gifResolution=[1920 1080]` 设置尺寸；`gifFPS=8` 设置帧率；`gifMaxDuration=20` 限制运动播放时长，较长的排程会整体加速，任务并行与先后关系保持不变。默认按 `animationSpeed` 播放，开头停留约 1 秒，结尾停留约 2 秒。`gifShowAllStations=true` 默认显示全部巷道货位与库存，车辆配色与浏览器一致，并使用小车图标、车辆状态卡和同步时间轴；设为 `false` 可聚焦任务起终点和车辆初始站点。
+
+HTML 与 GIF 共用 `buildAnimationData` 的调度时间数据。GIF 中 AGV 在站点连线上移动，装货完成后货物随车、卸货完成后货物留在终点，并显示车辆状态和同步时间轴。受阻且未派单的排程导出静态 GIF，显示受阻原因。GIF 保存在已忽略的 `results` 目录，另有 `*_animation.gif` 忽略规则，生成文件不提交 Git。
+
 ## 17. AI Modification Guidelines
 先读 README。禁止修改原始 CSV 或用户手动输入、对称化距离、填 NaN、把 Unknown 当 Slot、用站点号直接索引。参数放 config；算法解耦；修改货位预留/事件时间/容量/任务规则同步文档和测试。原始 metadata 与用户物理比例假设保持区分。新增临时搬运之前不能伪造障碍货已被移走。

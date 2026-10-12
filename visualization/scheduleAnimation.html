@@ -32,7 +32,7 @@ const $=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
 const colors=['#336be4','#159b83','#9859d1','#dc6570','#bb7b21','#457e8d'];
 const color=id=>colors[Math.max(0,D.vehicles.findIndex(v=>v.id===id))%colors.length];
 const fmt=x=>typeof x==='number'?x.toFixed(2):'—';
-const scheduled=D.tasks.filter(t=>t.vehicle!==0).sort((a,b)=>a.start-b.start);
+const scheduled=D.tasks.filter(t=>t.vehicle!==0).sort((a,b)=>a.start-b.start||(a.dispatchOrder||0)-(b.dispatchOrder||0));
 const events=[...new Set([0,D.duration,...scheduled.flatMap(t=>[t.start,t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.finish])])].sort((a,b)=>a-b);
 const vehicleTasks=new Map(D.vehicles.map(v=>[v.id,scheduled.filter(t=>t.vehicle===v.id)]));
 function svg(parent,tag,attrs={},label){const e=document.createElementNS(NS,tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);if(label!==undefined)e.textContent=label;parent.appendChild(e);return e;}

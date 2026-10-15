@@ -20,11 +20,38 @@ blank=table(slots.StationMark,repmat("",height(slots),1),slots.PocketName,slots.
 fixtureDir=tempname(testCfg.resultsDir); mkdir(fixtureDir); fixtureCleanup=onCleanup(@()rmdir(fixtureDir,'s'));
 testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fixtureDir,'tasks.csv');
 
+% Five-slot No-hole cases, with shuffled map and cargo rows.
+lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
+ 'VariableNames',{'PocketKey','PocketName','Sequence','StationMark','StationType'});
+patterns=[1 1 1 0 0;0 0 0 0 0;1 1 1 1 1;1 0 1 0 0;0 1 0 0 0];
+for n=1:5
+ ids=strings(5,1); occupied=find(patterns(n,:)); ids(occupied)="T"+string(occupied(:));
+ inventory=table((901:905)',ids,'VariableNames',{'StationMark','CargoID'});
+ inventory=inventory([5 3 1 4 2],:); shuffled=lane([3 5 2 4 1],:);
+ if n<=3
+  validateNoHoleState(inventory,shuffled);
+ else
+  expectError(@()validateNoHoleState(inventory,shuffled),'AGV:InternalHole');
+  try
+   validateNoHoleState(inventory,shuffled);
+  catch err
+   assert(contains(err.message,"Lane TEST (PocketKey A)") && ...
+    contains(err.message,"Sequence") && contains(err.message,"Station") && contains(err.message,"contains cargo T"));
+  end
+ end
+end
+% Distinct PocketKeys with the same name remain independent; non-Slots ignored.
+other=lane; other.PocketKey(:)="B"; other.StationMark=other.StationMark+10;
+inventory=table([(901:905)';(911:915)'],[repmat("",5,1);"B";repmat("",4,1)], ...
+ 'VariableNames',{'StationMark','CargoID'});
+nonSlot=lane(1,:); nonSlot.StationType="Entrance"; nonSlot.StationMark=999;
+validateNoHoleState(inventory,[lane;other;nonSlot]);
+expectError(@()loadFixture(putCargo(blank,12,"HOLE"),taskInput("HOLE",10),testData,testCfg),'AGV:InternalHole');
 % Manual loader derives pickup and preserves text IDs, without rewriting inputs.
-cargo=putCargo(blank,[12 110],["C001" "C002"]);
+cargo=putCargo(blank,[85 86],["C001" "C002"]);
 input=taskInput(["C001" "C002"],[10 21]);
 [tasks,data]=loadFixture(cargo,input,testData,testCfg);
-assert(isequal(tasks.PickupStation,[12;110]));
+assert(isequal(tasks.PickupStation,[85;86]));
 r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible);
 assert(all(r.taskStartTime==0) && numel(unique(r.assignedAGV))==2);
 assert(isequal([r.agvs.ID],testCfg.agvIDs)); verifyEvents(r,data,testCfg);
@@ -54,45 +81,48 @@ isolated=testCfg; isolated.agvInitialStations=repmat(5,1,testCfg.numAGV);
 [f,bad]=evaluateSequence([1 2],tasks,data,isolated); assert(f==isolated.invalidCost && ~bad.isFeasible);
 
 % Moving existing outer cargo allows inner pickup, with full predecessor completion.
-cargo=putCargo(blank,[85 12],["INNER" "OUTER"]);
+cargo=putCargo(blank,[72 71],["INNER" "OUTER"]);
 [tasks,data]=loadFixture(cargo,taskInput(["INNER" "OUTER"],[21 10]),testData,testCfg);
 r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1]));
 assert(r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
 % Passive cargo blocks pickup; it is not omitted simply because it has no task.
-cargo=putCargo(blank,[85 12],["INNER" "BLOCKER"]);
+cargo=putCargo(blank,[72 71],["INNER" "BLOCKER"]);
 [tasks,data]=loadFixture(cargo,taskInput("INNER",10),testData,testCfg);
 [f,bad]=evaluateSequence(1,tasks,data,testCfg); assert(~bad.isFeasible && f==testCfg.invalidCost && contains(bad.failureReason,"Pickup blocked"));
 
-% Passive cargo also blocks putting down at an inner Slot.
-cargo=putCargo(blank,[110 12],["MOVE" "BLOCKER"]);
-[tasks,data]=loadFixture(cargo,taskInput("MOVE",85),testData,testCfg);
-[f,bad]=evaluateSequence(1,tasks,data,testCfg); assert(~bad.isFeasible && f==testCfg.invalidCost && contains(bad.failureReason,"Dropoff blocked"));
+% Runtime obstruction after a valid compact initial state.
+cargo=putCargo(blank,[86 85],["MOVE" "BLOCKER"]);
+[tasks,data]=loadFixture(cargo,taskInput("MOVE",63),testData,testCfg);
+state=initializeCargoState(data);
+state.occupancy(state.slotMarks==85)="";
+state.occupancy(state.slotMarks==12)="BLOCKER";
+[feasible,reason]=checkCargoTaskFeasible(tasks(1,:),data,state); assert(~feasible && contains(reason,"Dropoff blocked"));
 
 % An occupied destination can become available through another requested move.
-cargo=putCargo(blank,[110 10],["INCOMING" "VACATE"]);
+cargo=putCargo(blank,[86 10],["INCOMING" "VACATE"]);
 [tasks,data]=loadFixture(cargo,taskInput(["INCOMING" "VACATE"],[10 21]),testData,testCfg);
 r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1]));
 assert(r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
 % Putaway order matters: filling the outer Slot first blocks the inner putaway.
-cargo=putCargo(blank,[110 111],["OUTER_DEST" "INNER_DEST"]);
+cargo=putCargo(blank,[86 88],["OUTER_DEST" "INNER_DEST"]);
 [tasks,data]=loadFixture(cargo,taskInput(["OUTER_DEST" "INNER_DEST"],[12 85]),testData,testCfg);
 bad=simulateSchedule([1 2],tasks,data,testCfg); assert(~bad.isFeasible && contains(bad.failureReason,"Dropoff blocked"));
 r=simulateSchedule([2 1],tasks,data,testCfg); assert(r.isFeasible && r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
 % Destination reservation prevents two vehicles depositing into the same Slot.
-cargo=putCargo(blank,[12 110],["ONE" "TWO"]);
+cargo=putCargo(blank,[85 86],["ONE" "TWO"]);
 [tasks,data]=loadFixture(cargo,taskInput(["ONE" "TWO"],[10 10]),testData,testCfg);
 bad=simulateSchedule([1 2],tasks,data,testCfg); assert(~bad.isFeasible);
 assert(sum(bad.taskStatus=="Completed")==1 && sum(bad.eventLog.Event=="Dropoff")==1); verifyEvents(bad,data,testCfg);
 
 % ReleaseTime, one-vehicle sequential service and same-lane self movement.
-cargo=putCargo(blank,12,"SELF");
-input=taskInput("SELF",85); input.ReleaseTime=30;
+cargo=putCargo(blank,85,"SELF");
+input=taskInput("SELF",63); input.ReleaseTime=30;
 [tasks,data]=loadFixture(cargo,input,testData,testCfg);
 r=simulateSchedule(1,tasks,data,testCfg); assert(r.isFeasible && r.taskStartTime==30); verifyEvents(r,data,testCfg);
-cargo=putCargo(blank,[12 110],["ONE" "TWO"]);
+cargo=putCargo(blank,[85 86],["ONE" "TWO"]);
 [tasks,data]=loadFixture(cargo,taskInput(["ONE" "TWO"],[10 21]),testData,testCfg);
 one=testCfg; one.numAGV=1; one.agvIDs=2; one.agvInitialStations=2;
 r=simulateSchedule([1 2],tasks,data,one); assert(r.isFeasible && r.taskStartTime(2)>=r.taskFinishTime(1)); verifyEvents(r,data,one);
@@ -102,9 +132,9 @@ r=simulateSchedule([1 2],tasks,data,zero); assert(r.isFeasible); verifyEvents(r,
 % Input errors: missing/duplicate cargo, non-Slot destination and blank task rows.
 input=taskInput("MISSING",10);
 expectError(@()loadFixture(blank,input,testData,testCfg),'AGV:MissingCargo');
-cargo=putCargo(blank,[12 110],["DUP" "DUP"]);
+cargo=putCargo(blank,[85 86],["DUP" "DUP"]);
 expectError(@()loadFixture(cargo,taskInput("DUP",10),testData,testCfg),'AGV:DuplicateCargo');
-cargo=putCargo(blank,12,"ONE");
+cargo=putCargo(blank,85,"ONE");
 expectError(@()loadFixture(cargo,taskInput("ONE",6),testData,testCfg),'AGV:DropoffType');
 expectError(@()loadFixture(cargo,taskInput(["ONE" "ONE"],[10 21]),testData,testCfg),'AGV:RepeatedCargoTask');
 [tasks,data]=loadFixture(blank,taskInput(strings(0,1),zeros(0,1)),testData,testCfg);

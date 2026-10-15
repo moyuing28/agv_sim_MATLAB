@@ -127,3 +127,7 @@ HTML 与 GIF 共用 `buildAnimationData` 的调度时间数据。GIF 中 AGV 在
 
 ## 17. AI Modification Guidelines
 先读 README。禁止修改原始 CSV 或用户手动输入、对称化距离、填 NaN、把 Unknown 当 Slot、用站点号直接索引。参数放 config；算法解耦；修改货位预留/事件时间/容量/任务规则同步文档和测试。原始 metadata 与用户物理比例假设保持区分。新增临时搬运之前不能伪造障碍货已被移走。
+
+初始库存采用 Compact Storage / No-hole：Sequence=0 为最深处，数值越大越靠近入口。逐条真实 PocketKey，只对 Slot 按 Sequence 升序检查，CargoID 非空表示占用，占用向量必须为 `[1 ... 1 0 ... 0]`。空巷道和满巷道合法；空位后再次有货时报 `AGV:InternalHole`，包含 PocketName、PocketKey、两处 Sequence/StationMark 及 CargoID。独立函数 `data/validateNoHoleState.m` 接收当前货物表和 lanes，方便以后重复调用；本阶段只接入初始加载校验。
+
+示例若在站点12、110放货，巷道01、02的 Sequence 0–5 也必须连续有货，不能仅在最外层放货。

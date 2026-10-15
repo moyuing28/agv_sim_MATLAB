@@ -18,6 +18,7 @@ for k=1:height(cargo)
  rows=slots(slots.StationMark==cargo.StationMark(k),:);
  assert(any(rows.PocketName==cargo.PocketName(k) & rows.Sequence==cargo.Sequence(k)), 'AGV:CargoMetadata','Slot %g PocketName/Sequence does not match lanes.csv.',cargo.StationMark(k));
 end
+validateNoHoleState(cargo,data.lanes);
 assert(all(ismember({'TaskID','CargoID','DropoffStation','ReleaseTime'},tasks.Properties.VariableNames)), 'AGV:TaskColumns','Missing task input columns.');
 assert(all(isfinite(tasks.TaskID) & tasks.TaskID==fix(tasks.TaskID)) && numel(unique(tasks.TaskID))==height(tasks),'AGV:TaskID','TaskID must be unique finite integers.');
 assert(all(~ismissing(tasks.CargoID) & tasks.CargoID~=""),'AGV:TaskCargo','Every task must name a cargo.');

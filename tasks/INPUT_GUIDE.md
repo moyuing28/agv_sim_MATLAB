@@ -25,3 +25,7 @@ TaskID,CargoID,DropoffStation,ReleaseTime
 这些是填写示例；两条任务配合站点12的 C001、站点110的 C002 和空目标10、21，已通过真实地图事件仿真测试。用户需自行配置货物初始位置；任务引用未配置货物时启动会报 AGV:MissingCargo。互换两个已占用货位时，本版需要额外缓冲搬运，否则报告目标占用。CargoID 必须与货物配置表完全一致，任务集中每件货物最多出现一次；TaskID 唯一；DropoffStation 必须是 Slot；ReleaseTime 单位秒，当前静态实验全部填 0。不要在任务表放空白占位行。
 
 加载后的运行任务表根据货物初始位置补出 PickupStation，同时保存目标站、任务类型和状态。输入文件只读，程序不能自动重写用户配置。目标是否为空、外侧是否阻挡应按运行时状态检查，不能仅凭 CSV 路径可达就认为可执行。未来障碍货搬运任务会独立生成，并按实际货物位置更新未执行任务起点。
+
+初始库存采用 Compact Storage / No-hole：Sequence=0 为最深处，数值越大越靠近入口。逐条真实 PocketKey，只对 Slot 按 Sequence 升序检查，CargoID 非空表示占用，占用向量必须为 `[1 ... 1 0 ... 0]`。空巷道和满巷道合法；空位后再次有货时报 `AGV:InternalHole`，包含 PocketName、PocketKey、两处 Sequence/StationMark 及 CargoID。独立函数 `data/validateNoHoleState.m` 接收当前货物表和 lanes，方便以后重复调用；本阶段只接入初始加载校验。
+
+示例若在站点12、110放货，巷道01、02的 Sequence 0–5 也必须连续有货，不能仅在最外层放货。

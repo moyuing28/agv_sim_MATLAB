@@ -20,6 +20,8 @@ blank=table(slots.StationMark,repmat("",height(slots),1),slots.PocketName,slots.
 fixtureDir=tempname(testCfg.resultsDir); mkdir(fixtureDir); fixtureCleanup=onCleanup(@()rmdir(fixtureDir,'s'));
 testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fixtureDir,'tasks.csv');
 testLaneHelpers(testData,blank);
+addpath(fullfile(projectRoot,'tests'));
+testCustomerAssessment();
 
 % Five-slot No-hole cases, with shuffled map and cargo rows.
 lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
@@ -98,7 +100,7 @@ cargo=putCargo(blank,[86 85],["MOVE" "BLOCKER"]);
 state=initializeCargoState(data);
 state.occupancy(state.slotMarks==85)="";
 state.occupancy(state.slotMarks==12)="BLOCKER";
-[feasible,reason]=checkCargoTaskFeasible(tasks(1,:),data,state); assert(~feasible && contains(reason,"Dropoff blocked"));
+expectError(@()checkCargoTaskFeasible(tasks(1,:),data,state),'AGV:InternalHole');
 
 % An occupied destination can become available through another requested move.
 cargo=putCargo(blank,[86 10],["INCOMING" "VACATE"]);
@@ -106,21 +108,24 @@ cargo=putCargo(blank,[86 10],["INCOMING" "VACATE"]);
 r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1]));
 assert(r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
-% Putaway order matters: filling the outer Slot first blocks the inner putaway.
+% Compact drop gate defers the outer destination until the inner move completes.
 cargo=putCargo(blank,[86 88],["OUTER_DEST" "INNER_DEST"]);
-[tasks,data]=loadFixture(cargo,taskInput(["OUTER_DEST" "INNER_DEST"],[12 85]),testData,testCfg);
-bad=simulateSchedule([1 2],tasks,data,testCfg); assert(~bad.isFeasible && contains(bad.failureReason,"Dropoff blocked"));
+[tasks,data]=loadFixture(cargo,taskInput(["OUTER_DEST" "INNER_DEST"],[63 85]),testData,testCfg);
+r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1])); verifyEvents(r,data,testCfg);
 r=simulateSchedule([2 1],tasks,data,testCfg); assert(r.isFeasible && r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
 % Destination reservation prevents two vehicles depositing into the same Slot.
 cargo=putCargo(blank,[85 86],["ONE" "TWO"]);
 [tasks,data]=loadFixture(cargo,taskInput(["ONE" "TWO"],[10 10]),testData,testCfg);
-bad=simulateSchedule([1 2],tasks,data,testCfg); assert(~bad.isFeasible);
-assert(sum(bad.taskStatus=="Completed")==1 && sum(bad.eventLog.Event=="Dropoff")==1); verifyEvents(bad,data,testCfg);
+expectError(@()simulateSchedule([1 2],tasks,data,testCfg),'AGV:CompletedCargoBlocked');
 
 % ReleaseTime, one-vehicle sequential service and same-lane self movement.
 cargo=putCargo(blank,85,"SELF");
 input=taskInput("SELF",63); input.ReleaseTime=30;
+[tasks,data]=loadFixture(cargo,input,testData,testCfg);
+r=simulateSchedule(1,tasks,data,testCfg); assert(~r.isFeasible && contains(r.failureReason,"temporary self relocation"));
+% ReleaseTime is verified on a legal cross-Lane customer move.
+input=taskInput("SELF",10); input.ReleaseTime=30;
 [tasks,data]=loadFixture(cargo,input,testData,testCfg);
 r=simulateSchedule(1,tasks,data,testCfg); assert(r.isFeasible && r.taskStartTime==30); verifyEvents(r,data,testCfg);
 cargo=putCargo(blank,[85 86],["ONE" "TWO"]);

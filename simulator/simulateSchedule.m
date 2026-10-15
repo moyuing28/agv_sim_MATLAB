@@ -20,6 +20,7 @@ catch err
  result.failureReason=string(err.message); return;
 end
 state=initializeCargoState(data); state.taskStatus=result.taskStatus;
+state.customerTasks=tasks; % Catalog only; current completion lives in taskStatus.
 base=struct('ID',0,'CurrentStation',0,'AvailableTime',0,'TotalTravelDistance',0,'TotalBusyTime',0,'TaskHistory',[],'CargoID',"",'ActiveTask',0);
 agvs=repmat(base,1,cfg.numAGV);
 for a=1:cfg.numAGV

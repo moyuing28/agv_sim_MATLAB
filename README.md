@@ -17,14 +17,36 @@
 Sequence=0 在深处，数值越大越靠近入口，OrderStationsDirection=DeepToEntrance。只有 Slot 可以存货和取放；Entrance、Unknown 仅为结构/导航信息。取货及放货都要求该货位外侧所有 Slot 无货。
 getSlotAccessStations 根据真实 PocketKey 与 Sequence 找外侧货位，不能把 PocketName 当唯一业务主键。货物表中的 PocketName/Sequence 是定位提示，启动时与真实 lanes 校验。
 
-Lane 状态查询接口（阶段 2）均为独立函数，不缓存 frontier，也尚未接入现有调度主循环：
+Lane 状态查询接口（阶段 2）均为独立函数，不缓存 frontier，阶段 3 通过 assessment 间接供可行性检查调用：
 
 - `[station,sequence,cargoID] = getLaneFrontier(pocketKey,state,data)`：仅对指定 PocketKey 的 Slot 排序，读取实时 `state.occupancy`，复用 No-hole 校验后返回最大已占用 Sequence。空 Lane 返回 `NaN,-1,""`；未知或没有 Slot 的 Key 报 `AGV:LaneKey`。
 - `cargo = getOuterCargo(pocketKey,state,data)`：返回 frontier 的一行 table，列为 `CargoID,StationMark,Sequence`；空 Lane 返回同列的零行 table。
 - `[station,sequence,isAvailable] = getLegalDropSlot(pocketKey,state,data)`：返回 frontier Sequence+1 对应的真实 Slot；空 Lane 返回 Sequence 0，满 Lane 返回 `NaN,-1,false`。深度来自 `data.lanes`，该查询只判断库存位置，不包含预留或完整派单可行性。以后判断合法放货位置应使用此接口；`getSlotAccessStations` 继续用于查询入口方向的阻挡位置。
 - `station = getCargoCurrentStation(cargoID,state)`：读取实时 `state.cargos`；AtSlot 返回 CurrentStation，OnAGV 返回 NaN，不存在报 `AGV:MissingCargo`。不读取静态任务起点或初始库存。
 
-Lane 查询遇到内部空洞时报 `AGV:InternalHole`。本阶段仅提供查询接口和测试，不改变 Customer Task 执行、AGV 分配或 Pickup/Dropoff 逻辑。
+Lane 查询遇到内部空洞时报 `AGV:InternalHole`。
+
+### Customer Task assessment（阶段 3 / v3.1）
+
+`a = assessCustomerTask(task,data,state,customerTasks)` 是只读评估。第四个参数为完整 Customer Task table；省略时使用 `state.customerTasks`，再省略则只知道当前单条任务，无法识别其他 Future/Completed Cargo。任务目录保留原有 TaskID（不作行索引）；实时 `state.taskStatus` 按目录行顺序覆盖目录 Status，未提供实时状态时使用 Status，默认 Pending。`simulateSchedule` 仅在初始化时附加目录，未改主循环；尚不执行任何准备 Action。
+
+assessment 字段：
+
+- 标识：`CustomerTaskID, CargoID`。
+- 实时位置：`SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, SourceTargetSameLane`。
+- Ready：`SourceReady, TargetReady, CustomerMoveReady`。
+- 动作：`SourceAction, TargetAction, MainAction`；`SourceActionCargoID, SourceActionStation, TargetActionCargoID, TargetActionStation, TargetActionReason`；额外用 `MainActionCargoID, MainActionStation` 明确 R_SELF/CUSTOMER_MOVE 的货物和源位置。
+- 准备详情：`RequiredFillingCount, NextFillingStation, ProtectedFutureCargoID, RequiresTemporarySelfRelocation, Reason`。无对应数值/字符串/标志使用 NaN/空字符串/false。
+
+Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupStation。OnAGV 立即返回 `CARGO_IN_TRANSIT` 且三个 Ready 均 false。不同 Lane 独立评估两端：Source 不是 outer cargo 时返回当前 outer 的 `R_SOURCE`；Target 按 `R_TARGET → R_FUTURE → FILLING → Ready` 顺序判断。Target 位于占用前缀内时返回当前 outer 的 `R_TARGET/TargetClearing`；否则检查更深处未完成 Customer Cargo，存在则返回当前 outer 的 `R_FUTURE/TerminalProtection`，并单独记录受保护货物（多个时优先标识最靠入口者）。普通 Cargo 和已完成的深层 Cargo 不主动触发 R_FUTURE。没有上述障碍时，Target 等于 legal drop 才 Ready；更外侧则返回 FILLING、Sequence 差值及下一个填充站，不选择填充货物。
+
+两端可同时返回 Action，TargetPrep 优先只是后续调度偏好，不是 hard precedence。本阶段不排序、不派单。只有 SourceReady && TargetReady 且货物 AtSlot 时才能 `CUSTOMER_MOVE`，禁止先 Pickup 等待目标准备。Future Customer Cargo 可作为临时清障对象，评估不会完成其 Customer Task；任一应搬障碍若已 Completed，报 `AGV:CompletedCargoBlocked`，禁止再次搬动。
+
+同 Lane 先清 Source。Customer Cargo 暴露后，只在 state 副本中移除源货物并评估 Target。可立即合法回填时返回 CUSTOMER_MOVE；否则仅暴露 R_SELF，目标端的原因、Filling 数量等保留为 post-pickup 分析详情，不同时执行目标准备。R_SELF 不是完成任务；临时搬到别的 Lane 后，下次查询实时位置自然进入不同 Lane 模式，不维护 phase。Compact 模型下同 Lane 直接完成的边界是回到原 Slot；现有 CSV 校验仍禁止源终点相同的正式请求，单元测试直接验证此评估边界。
+
+`checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。当前旧模拟器事件执行仍用静态 PickupStation；本阶段不会执行 Relocation，因此动态位置仅在 assessment/可行性接口验证，后续执行层改造另行进行。
+
+**遗留约束**：`buildLaneConstraints` 仍按初始 Source Lane 的外→内深浅关系生成 hard precedence，本阶段未修改；这不符合 v3.1 最终约束模型，下一阶段需替换为 Target/Business precedence。当前不可将整个模拟器视为已完成 v3.1 调度实现。
 
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。

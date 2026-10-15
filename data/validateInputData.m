@@ -37,6 +37,6 @@ if nargin>=2 && ~isempty(tasks)
  for k=1:height(tasks)
   assert(isfinite(getTravelDistance(tasks.PickupStation(k),tasks.DropoffStation(k),data)),'AGV:UnreachableTask','Task %g loaded route is unreachable.',tasks.TaskID(k));
  end
- repairSequence(1:height(tasks),buildLaneConstraints(tasks,L));
+ repairSequence(1:height(tasks),buildTargetConstraints(tasks,L));
 end
 end

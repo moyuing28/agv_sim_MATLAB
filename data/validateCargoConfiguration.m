@@ -29,6 +29,7 @@ if ~all(known)
  error('AGV:MissingCargo','Tasks refer to cargo not configured in cargo_initial.csv: %s. Fill its CargoID at the actual Slot.',char(missing));
 end
 assert(all(ismember(tasks.DropoffStation,marks)),'AGV:DropoffType','Every destination must be a Slot; Entrance/Unknown are not storage locations.');
+buildTargetConstraints(tasks,data.lanes); % Static duplicate-target and DAG validation.
 assert(all(isfinite(tasks.ReleaseTime) & tasks.ReleaseTime>=0),'AGV:ReleaseTime','ReleaseTime must be nonnegative finite seconds.');
 sources=cargo.StationMark(occupied); sources=sources(loc);
 assert(all(sources~=tasks.DropoffStation),'AGV:SameStation','Pickup and Dropoff must differ.');

@@ -22,6 +22,7 @@ testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fi
 testLaneHelpers(testData,blank);
 addpath(fullfile(projectRoot,'tests'));
 testCustomerAssessment();
+testTargetConstraints();
 
 % Five-slot No-hole cases, with shuffled map and cargo rows.
 lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
@@ -114,10 +115,9 @@ cargo=putCargo(blank,[86 88],["OUTER_DEST" "INNER_DEST"]);
 r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1])); verifyEvents(r,data,testCfg);
 r=simulateSchedule([2 1],tasks,data,testCfg); assert(r.isFeasible && r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
 
-% Destination reservation prevents two vehicles depositing into the same Slot.
+% Duplicate final targets are rejected before entering the simulation.
 cargo=putCargo(blank,[85 86],["ONE" "TWO"]);
-[tasks,data]=loadFixture(cargo,taskInput(["ONE" "TWO"],[10 10]),testData,testCfg);
-expectError(@()simulateSchedule([1 2],tasks,data,testCfg),'AGV:CompletedCargoBlocked');
+expectError(@()loadFixture(cargo,taskInput(["ONE" "TWO"],[10 10]),testData,testCfg),'AGV:DuplicateCustomerTarget');
 
 % ReleaseTime, one-vehicle sequential service and same-lane self movement.
 cargo=putCargo(blank,85,"SELF");

@@ -46,7 +46,7 @@ Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupSt
 
 `checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。当前旧模拟器事件执行仍用静态 PickupStation；本阶段不会执行 Relocation，因此动态位置仅在 assessment/可行性接口验证，后续执行层改造另行进行。
 
-**遗留约束**：`buildLaneConstraints` 仍按初始 Source Lane 的外→内深浅关系生成 hard precedence，本阶段未修改；这不符合 v3.1 最终约束模型，下一阶段需替换为 Target/Business precedence。当前不可将整个模拟器视为已完成 v3.1 调度实现。
+阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。准备动作仍未实现，当前不可将整个模拟器视为已完成 v3.1 调度实现。
 
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
@@ -74,7 +74,11 @@ sequence 是任务表行索引 1:N 的完整排列，不是 CargoID、TaskID 或
 prioritySequence 为拓扑修复后的优先列表；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。遗传编码应使用完整优先排列，不能拿失败结果的部分 finalSequence 当完整染色体。
 
 ## 10. Constraints and Event Semantics
-buildLaneConstraints 仍生成同巷道现有取货任务的外→内前置边，并通过 repairSequence 修复。只有实际任务参与固定前置边；非任务货物的阻挡通过真实 occupancy 判断。前置任务全部卸货完成后后续取货任务才释放，这是保守业务规则。
+`buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。
+
+旧规则“Source Lane 外层 Customer Task 必须先于内层 Customer Task”已经废弃。初始 Source、实时 CurrentStation、普通货物占用均不参与静态硬约束；Source blocking 由运行时 Relocation 解决（执行模块尚未实现）。**终端管硬顺序，源端管动态清障。**
+
+可选 businessEdges 是显式任务行索引边，默认 0×2；本阶段不新增业务 CSV 或配置系统。Target 与 business 边合并后统一由 validateTaskPrecedence 检查强连通分量和自环，存在环时报 AGV:CyclicTaskPrecedence，列出实际环内 TaskID/CargoID。重复最终 TargetStation 在输入加载阶段报 AGV:DuplicateCustomerTarget，列出目标站和冲突的 TaskID/CargoID。不同 Target PocketKey 不自动产生边，PocketName 仅用于显示。buildLaneConstraints 只保留为兼容 wrapper，转发到新函数，不存在第二套 Source 约束。
 任务派单时必须：货物在源站、目标为空、源外侧无货、目标外侧无货、访问货位未被其他任务预留。若任务从外侧搬到同巷道内侧，源货物在放货前已取走，不视为它对自身目的地的阻挡。
 第一版保守预留源站、目标站和两端所有外侧 Slot，直到该任务卸货完成才释放。这样避免两车争抢空位、行驶期间新放入货物封堵访问，但会限制部分同巷道并行；这是货位访问资源规则，不是交通冲突模型。
 Dispatch：预留访问货位并标记 AGV 忙碌；不提前移动库存。
@@ -90,7 +94,9 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 - data/buildDistanceMatrix.m：唯一站点映射与完整有向距离矩阵。
 - data/validateInputData.m：原始数据、车辆配置、任务路径与约束检查。
 - data/validateCargoConfiguration.m：所有 Slot、唯一货物、手动任务检查。
-- data/buildLaneConstraints.m：取货任务外→内前置边。
+- data/buildTargetConstraints.m：最终 Target 深→浅相邻任务硬约束及可选业务边。
+- data/validateTaskPrecedence.m：统一 DAG 校验和环内任务报告。
+- data/buildLaneConstraints.m：弃用名称的兼容 wrapper，转发 Target 约束。
 - tasks/loadTaskConfiguration.m：只读加载两个 CSV，补起点和运行字段。
 - tasks/cargo_initial.csv：用户初始全部货位占用。
 - tasks/tasks_input.csv：用户正式搬运请求。

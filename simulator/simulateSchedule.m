@@ -14,7 +14,7 @@ try
  validateCargoConfiguration(data.cargoInitial,tasks,data);
  validateInputData(data,tasks,cfg);
  assert(numel(sequence)==n,'AGV:Permutation','Sequence length must equal task count.');
- result.constraints=buildLaneConstraints(tasks,data.lanes);
+ result.constraints=buildTargetConstraints(tasks,data.lanes);
  priority=repairSequence(sequence,result.constraints); result.prioritySequence=priority;
 catch err
  result.failureReason=string(err.message); return;

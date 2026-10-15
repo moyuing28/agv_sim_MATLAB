@@ -14,7 +14,7 @@ try
  data=loadSimulationData(cfg); dataReport=validateInputData(data);
  [tasks,cargoInitial]=loadTaskConfiguration(data,cfg);
  data.cargoInitial=cargoInitial; validateInputData(data,tasks,cfg);
- constraints=buildLaneConstraints(tasks,data.lanes);
+ constraints=buildTargetConstraints(tasks,data.lanes);
  fprintf('Unique stations: %d; pockets: %d; Slots: %d; cargos: %d; tasks: %d; precedence edges: %d\n',dataReport.uniqueStations,dataReport.pockets,height(cargoInitial),sum(cargoInitial.CargoID~=""),height(tasks),size(constraints,1));
  fprintf('NaN distances: %d; isolated stations: ',dataReport.nanCount); fprintf('%g ',dataReport.isolatedStations); fprintf('\n');
  seqFCFS=fcfsSequence(tasks); seqRandom=randomSequence(tasks);

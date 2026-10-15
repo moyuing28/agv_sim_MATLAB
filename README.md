@@ -17,6 +17,15 @@
 Sequence=0 在深处，数值越大越靠近入口，OrderStationsDirection=DeepToEntrance。只有 Slot 可以存货和取放；Entrance、Unknown 仅为结构/导航信息。取货及放货都要求该货位外侧所有 Slot 无货。
 getSlotAccessStations 根据真实 PocketKey 与 Sequence 找外侧货位，不能把 PocketName 当唯一业务主键。货物表中的 PocketName/Sequence 是定位提示，启动时与真实 lanes 校验。
 
+Lane 状态查询接口（阶段 2）均为独立函数，不缓存 frontier，也尚未接入现有调度主循环：
+
+- `[station,sequence,cargoID] = getLaneFrontier(pocketKey,state,data)`：仅对指定 PocketKey 的 Slot 排序，读取实时 `state.occupancy`，复用 No-hole 校验后返回最大已占用 Sequence。空 Lane 返回 `NaN,-1,""`；未知或没有 Slot 的 Key 报 `AGV:LaneKey`。
+- `cargo = getOuterCargo(pocketKey,state,data)`：返回 frontier 的一行 table，列为 `CargoID,StationMark,Sequence`；空 Lane 返回同列的零行 table。
+- `[station,sequence,isAvailable] = getLegalDropSlot(pocketKey,state,data)`：返回 frontier Sequence+1 对应的真实 Slot；空 Lane 返回 Sequence 0，满 Lane 返回 `NaN,-1,false`。深度来自 `data.lanes`，该查询只判断库存位置，不包含预留或完整派单可行性。以后判断合法放货位置应使用此接口；`getSlotAccessStations` 继续用于查询入口方向的阻挡位置。
+- `station = getCargoCurrentStation(cargoID,state)`：读取实时 `state.cargos`；AtSlot 返回 CurrentStation，OnAGV 返回 NaN，不存在报 `AGV:MissingCargo`。不读取静态任务起点或初始库存。
+
+Lane 查询遇到内部空洞时报 `AGV:InternalHole`。本阶段仅提供查询接口和测试，不改变 Customer Task 执行、AGV 分配或 Pickup/Dropoff 逻辑。
+
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
 

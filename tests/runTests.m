@@ -19,6 +19,7 @@ slots=testData.lanes(testData.lanes.StationType=="Slot",:);
 blank=table(slots.StationMark,repmat("",height(slots),1),slots.PocketName,slots.Sequence,'VariableNames',{'StationMark','CargoID','PocketName','Sequence'});
 fixtureDir=tempname(testCfg.resultsDir); mkdir(fixtureDir); fixtureCleanup=onCleanup(@()rmdir(fixtureDir,'s'));
 testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fixtureDir,'tasks.csv');
+testLaneHelpers(testData,blank);
 
 % Five-slot No-hole cases, with shuffled map and cargo rows.
 lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
@@ -146,6 +147,88 @@ exportScheduleGIF(r,tasks,data,gifCfg,'Empty schedule',emptyGIF);
 assert(numel(imfinfo(emptyGIF))==1);
 clear fixtureCleanup;
 fprintf('All cargo/event scheduling tests passed.\n');
+
+function testLaneHelpers(realData,blank)
+% Same display name, different PocketKeys and depths; map/state order differ.
+lane=table(repmat("L",5,1),repmat("SAME",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
+ 'VariableNames',{'PocketKey','PocketName','Sequence','StationMark','StationType'});
+short=lane(1:2,:); short.PocketKey(:)="SHORT"; short.StationMark=[911;912];
+entrance=lane(1,:); entrance.StationType="Entrance"; entrance.Sequence=5; entrance.StationMark=999;
+unknown=entrance; unknown.StationType="Unknown"; unknown.Sequence=6;
+data.lanes=[lane([4 1 5 2 3],:);short([2 1],:);entrance;unknown];
+data.cargoInitial=table([(901:905)';911;912],["A";"B";"C";"";"";"";""], ...
+ 'VariableNames',{'StationMark','CargoID'});
+initial=initializeCargoState(data);
+order=[7 3 5 1 6 4 2]; initial.slotMarks=initial.slotMarks(order); initial.occupancy=initial.occupancy(order);
+% Tests 1-4: prefix of three, singleton, empty and full five-slot Lane.
+for count=[3 1 0 5]
+ state=initial; state.occupancy(:)="";
+ for k=1:count
+  state.occupancy(state.slotMarks==900+k)=string(char('A'+k-1));
+ end
+ [station,sequence,id]=getLaneFrontier("L",state,data);
+ outer=getOuterCargo("L",state,data);
+ [drop,dropSequence,available]=getLegalDropSlot("L",state,data);
+ assert(sequence==count-1);
+ if count==0
+  assert(isnan(station) && id=="" && isempty(outer));
+ else
+  assert(station==900+count && id==string(char('A'+count-1)));
+  assert(height(outer)==1 && outer.CargoID==id && outer.StationMark==station && outer.Sequence==sequence);
+ end
+ if count==5
+  assert(~available && isnan(drop) && dropSequence==-1);
+ else
+  assert(available && drop==901+count && dropSequence==count);
+ end
+end
+% Test 5: shorter Lane and real exported depths 1, 2, 7.
+state=initial;
+[drop,sequence,available]=getLegalDropSlot("SHORT",state,data);
+assert(available && drop==911 && sequence==0);
+state.occupancy(state.slotMarks==911)="SHORT-A";
+[drop,sequence,available]=getLegalDropSlot("SHORT",state,data);
+assert(available && drop==912 && sequence==1);
+state.occupancy(state.slotMarks==912)="SHORT-B";
+[drop,sequence,available]=getLegalDropSlot("SHORT",state,data);
+assert(~available && isnan(drop) && sequence==-1);
+outer=getOuterCargo("L",state,data); assert(outer.CargoID=="C");
+realData.cargoInitial=blank; realState=initializeCargoState(realData);
+for key=["10" "72" "85"]
+ slots=sortrows(realData.lanes(realData.lanes.PocketKey==key & realData.lanes.StationType=="Slot",:),'Sequence');
+ for k=1:height(slots)
+  [drop,sequence,available]=getLegalDropSlot(key,realState,realData);
+  assert(available && drop==slots.StationMark(k) && sequence==slots.Sequence(k));
+  realState.occupancy(realState.slotMarks==drop)="LIVE"+key+"-"+k;
+ end
+ [drop,sequence,available]=getLegalDropSlot(key,realState,realData);
+ assert(~available && isnan(drop) && sequence==-1);
+end
+% Test 6: occupancy changes immediately affect frontier; static input stays C.
+state=initial; state.occupancy(state.slotMarks==903)="";
+outer=getOuterCargo("L",state,data); assert(outer.CargoID=="B" && outer.Sequence==1);
+[drop,sequence,available]=getLegalDropSlot("L",state,data);
+assert(available && drop==903 && sequence==2);
+assert(data.cargoInitial.CargoID(data.cargoInitial.StationMark==903)=="C");
+% Test 7: moving outer cargo to another Lane's legal Slot updates live location.
+assert(getCargoCurrentStation("C",initial)==903);
+[drop,~,available]=getLegalDropSlot("SHORT",state,data); assert(available);
+state.occupancy(state.slotMarks==drop)="C";
+state.cargos.CurrentStation(state.cargos.CargoID=="C")=drop;
+assert(getCargoCurrentStation("C",state)==911);
+outer=getOuterCargo("SHORT",state,data); assert(outer.CargoID=="C");
+state.cargos.Status(state.cargos.CargoID=="C")="OnAGV";
+state.cargos.CurrentStation(state.cargos.CargoID=="C")=NaN;
+assert(isnan(getCargoCurrentStation("C",state)));
+expectError(@()getCargoCurrentStation("ABSENT",state),'AGV:MissingCargo');
+% Test 8: deliberately corrupt live inventory to verify fail-fast behavior.
+state=initial; state.occupancy(state.slotMarks==902)="";
+expectError(@()getLaneFrontier("L",state,data),'AGV:InternalHole');
+expectError(@()getOuterCargo("L",state,data),'AGV:InternalHole');
+expectError(@()getLegalDropSlot("L",state,data),'AGV:InternalHole');
+expectError(@()getLaneFrontier("ABSENT",initial,data),'AGV:LaneKey');
+fprintf('All Lane helper tests passed.\n');
+end
 
 function cargo=putCargo(cargo,marks,ids)
 for k=1:numel(marks), cargo.CargoID(cargo.StationMark==marks(k))=ids(k); end

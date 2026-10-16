@@ -13,6 +13,10 @@ for k=1:numel(results)
  if isfield(r,'TotalMoveCount')
   fprintf('Moves: %d; Relocation: %d; Filling: %d; Customer: %d\n',r.TotalMoveCount,r.RelocationCount,r.FillingCount,r.CustomerMoveCount);
  end
+ if isfield(r,'SystemMakespan')
+  fprintf('SystemMakespan=%.6f; CustomerCompletionMakespan=%.6f; Finalize=%d\n', ...
+   r.SystemMakespan,r.CustomerCompletionMakespan,r.FinalizeCount);
+ end
  if ~r.isFeasible, fprintf('Reason: %s\n',r.failureReason); end
 end
 fprintf('====================================\n');

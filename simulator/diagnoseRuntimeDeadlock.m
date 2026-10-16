@@ -8,8 +8,10 @@ for k=rows'
  a=assessCustomerTask(tasks(k,:),data,state); reason="";
  if ~checkTaskFeasible(k,completed,edges), reason="Hard predecessor not Completed";
  elseif tasks.ReleaseTime(k)>now, reason="ReleaseTime not reached";
+ elseif a.MainAction=="FINALIZE"
+  action=buildFinalizeAction(tasks(k,:),a,state,data); reason=action.Reason;
  elseif a.CustomerMoveReady
-  action=buildCustomerMoveAction(tasks(k,:),a,state,data); reason=action.Reason+"; no reachable idle AGV or running Parent preparation";
+  action=buildCustomerMoveAction(tasks(k,:),a,state,data); reason=action.Reason+"; no reachable idle AGV";
  elseif a.MainAction=="R_SELF"
   action=buildRelocationAction(tasks(k,:),a,"MAIN",state,data); reason=action.Reason;
  else

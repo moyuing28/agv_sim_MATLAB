@@ -17,6 +17,7 @@ a=struct('CustomerTaskID',task.TaskID,'CargoID',task.CargoID, ...
  'SourceStation',NaN,'SourcePocketKey',"",'SourceSequence',NaN, ...
  'TargetStation',task.DropoffStation,'TargetPocketKey',"",'TargetSequence',NaN, ...
  'SourceTargetSameLane',false,'SourceReady',false,'TargetReady',false,'CustomerMoveReady',false, ...
+ 'AlreadyAtFinalTarget',false,'FinalizeReady',false, ...
  'SourceAction',"NONE",'TargetAction',"NONE",'MainAction',"NONE", ...
  'SourceActionCargoID',"",'SourceActionStation',NaN, ...
  'TargetActionCargoID',"",'TargetActionStation',NaN,'TargetActionReason',"", ...
@@ -38,6 +39,25 @@ assert(numel(s)==1 && state.occupancy(s)==task.CargoID,'AGV:CargoState','Live ca
 if ismember(task.CargoID,completed)
  assert(a.SourceStation==a.TargetStation,'AGV:CargoState','Completed cargo is not at final target.');
  a.Reason="Customer task already Completed; cargo is fixed"; return;
+end
+if a.SourceStation==a.TargetStation
+ a.AlreadyAtFinalTarget=true;
+ % The cargo is already correctly placed. Do not clear it as an R_TARGET or
+ % apply the ordinary same-Lane post-pickup/R_SELF logic.
+ [station,~,id]=getLaneFrontier(a.TargetPocketKey,state,data);
+ slots=data.lanes(data.lanes.StationType=="Slot" & data.lanes.PocketKey==a.TargetPocketKey & data.lanes.Sequence<a.TargetSequence,:);
+ slots=sortrows(slots,'Sequence','descend');
+ [~,loc]=ismember(slots.StationMark,state.slotMarks);
+ ids=state.occupancy(loc); protected=find(ismember(ids,future),1);
+ if ~isempty(protected)
+  protect(id,completed);
+  a.TargetAction="R_FUTURE"; a.TargetActionCargoID=id; a.TargetActionStation=station;
+  a.ProtectedFutureCargoID=ids(protected); a.TargetActionReason="TerminalProtection";
+  a.Reason="Terminal protection required before Finalize"; return;
+ end
+ a.FinalizeReady=true; a.TargetReady=true; a.MainAction="FINALIZE";
+ a.MainActionCargoID=task.CargoID; a.MainActionStation=a.SourceStation;
+ a.Reason="Already at final target; eligible task may Finalize"; return;
 end
 outer=getOuterCargo(source.PocketKey,state,data);
 a.SourceReady=outer.CargoID==task.CargoID;

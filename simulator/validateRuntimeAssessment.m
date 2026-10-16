@@ -1,6 +1,10 @@
 function validateRuntimeAssessment(a)
 %VALIDATERUNTIMEASSESSMENT Fail fast on contradictory main/preparation flags.
 prep=a.SourceAction~="NONE" || a.TargetAction~="NONE";
+if isfield(a,'FinalizeReady') && (a.FinalizeReady || a.MainAction=="FINALIZE")
+ assert(a.AlreadyAtFinalTarget && a.FinalizeReady && a.MainAction=="FINALIZE" && ~a.CustomerMoveReady && ~prep, ...
+  'AGV:RuntimeAssessment','FINALIZE contradicts placement or preparation state.');
+end
 if a.CustomerMoveReady
  assert(a.SourceReady && a.TargetReady && ~prep && a.MainAction=="CUSTOMER_MOVE", ...
   'AGV:RuntimeAssessment','CustomerMoveReady contradicts preparation or endpoint readiness.');

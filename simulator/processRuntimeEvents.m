@@ -83,6 +83,7 @@ while true
     assert(state.customerTasks.CargoID(t)==m.CargoID && state.customerTasks.DropoffStation(t)==m.TargetStation, ...
      'AGV:RuntimeConsistency','Customer completion endpoint mismatch.');
     state.taskStatus(t)="Completed";
+    if isfield(state,'taskCompletionTime'), state.taskCompletionTime(t)=now; end
    end
    m.DropoffTime=now; m.CompletionTime=now;
    log=[log;runtimeEventRow(m,"Dropoff",m.TargetStation,state,now)]; %#ok<AGROW>

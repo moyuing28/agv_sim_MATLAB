@@ -40,6 +40,9 @@ for rank=1:n
  if ~checkTaskFeasible(row,completed,edges), continue; end
  a=assessCustomerTask(task,data,snapshot); validateRuntimeAssessment(a);
  if a.MainAction=="CARGO_IN_TRANSIT", continue; end
+ if a.MainAction=="FINALIZE"
+  ready=append(ready,buildFinalizeAction(task,a,snapshot,data),rank,"MAIN",0); continue;
+ end
  if a.CustomerMoveReady
   ready=append(ready,buildCustomerMoveAction(task,a,snapshot,data),rank,"MAIN",0); continue;
  end

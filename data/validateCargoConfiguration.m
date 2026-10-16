@@ -32,7 +32,8 @@ assert(all(ismember(tasks.DropoffStation,marks)),'AGV:DropoffType','Every destin
 buildTargetConstraints(tasks,data.lanes); % Static duplicate-target and DAG validation.
 assert(all(isfinite(tasks.ReleaseTime) & tasks.ReleaseTime>=0),'AGV:ReleaseTime','ReleaseTime must be nonnegative finite seconds.');
 sources=cargo.StationMark(occupied); sources=sources(loc);
-assert(all(sources~=tasks.DropoffStation),'AGV:SameStation','Pickup and Dropoff must differ.');
+% Already-at-final initial inventory is valid; runtime eligibility/FINALIZE
+% handles completion without inventing a same-station AGV Move.
 if ismember('PickupStation',tasks.Properties.VariableNames)
  assert(all(tasks.PickupStation==sources),'AGV:CargoPosition','Task pickup must match its cargo initial Slot.');
 end

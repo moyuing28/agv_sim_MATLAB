@@ -57,9 +57,9 @@ assert(s.taskStatus=="Pending");
 s=move(s,"M",301); a=assessCustomerTask(t,d,s);
 assert(~a.SourceTargetSameLane && a.SourcePocketKey=="U" && a.TargetAction=="FILLING" && a.MainAction=="NONE");
 % 19: only compact same-Lane direct boundary is return to same source Slot.
-% The existing CSV loader forbids same-station requests; assess the boundary directly.
+% Already-at-final completion is logical FINALIZE, never a same-slot Move.
 [d,s,t]=fixture(["A" "B" "M"],strings(0,1),0); t.DropoffStation=103; before=s;
-a=assessCustomerTask(t,d,s); assert(a.MainAction=="CUSTOMER_MOVE" && a.CustomerMoveReady && ~a.RequiresTemporarySelfRelocation && isequaln(s,before));
+a=assessCustomerTask(t,d,s); assert(a.MainAction=="FINALIZE" && a.FinalizeReady && a.AlreadyAtFinalTarget && ~a.CustomerMoveReady && ~a.RequiresTemporarySelfRelocation && isequaln(s,before));
 % 20: Completed cargo protection for each relocation kind.
 [d,s,t]=fixture("M","DONE",0); s=catalog(s,t,"DONE","Completed");
 expect(@()assessCustomerTask(t,d,s),'AGV:CompletedCargoBlocked');

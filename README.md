@@ -42,7 +42,7 @@ Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupSt
 
 两端可同时返回 Action，TargetPrep 优先只是后续调度偏好，不是 hard precedence。本阶段不排序、不派单。只有 SourceReady && TargetReady 且货物 AtSlot 时才能 `CUSTOMER_MOVE`，禁止先 Pickup 等待目标准备。Future Customer Cargo 可作为临时清障对象，评估不会完成其 Customer Task；任一应搬障碍若已 Completed，报 `AGV:CompletedCargoBlocked`，禁止再次搬动。
 
-同 Lane 先清 Source。Customer Cargo 暴露后，只在 state 副本中移除源货物并评估 Target。可立即合法回填时返回 CUSTOMER_MOVE；否则仅暴露 R_SELF，目标端的原因、Filling 数量等保留为 post-pickup 分析详情，不同时执行目标准备。R_SELF 不是完成任务；临时搬到别的 Lane 后，下次查询实时位置自然进入不同 Lane 模式，不维护 phase。Compact 模型下同 Lane 直接完成的边界是回到原 Slot；现有 CSV 校验仍禁止源终点相同的正式请求，单元测试直接验证此评估边界。
+同 Lane 先清 Source。Customer Cargo 暴露后，只在 state 副本中移除源货物并评估 Target。可立即合法回填时返回 CUSTOMER_MOVE；否则仅暴露 R_SELF，目标端的原因、Filling 数量等保留为 post-pickup 分析详情，不同时执行目标准备。R_SELF 不是完成任务；临时搬到别的 Lane 后，下次查询实时位置自然进入不同 Lane 模式，不维护 phase。阶段 7C 已将已在最终 Slot 的情况单独识别为 AlreadyAtFinalTarget，进行 terminal protection / FINALIZE，不再进行原地取放；初始已在 Target 的任务也允许经过 eligibility 后 FINALIZE。
 
 `checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。阶段 7B 执行层已改为读取 Running Move 的动态 Source/Target；静态 PickupStation 只在初始输入校验与旧 assignAGV 参数兼容分支保留，不用于 Runtime Move 取放。
 
@@ -129,7 +129,7 @@ ready = buildReadyActions(tasks,customerPriorityOrder,state,data,currentTime,bus
 % ready.ActionPayload{k} 保留原始 CUSTOMER_MOVE / RELOCATION / FILLING struct。
 ```
 
-`buildCustomerMoveAction(task,assessment,state,data)` 新增动态正式搬运 Action。构造前重新 assess，要求旧/新 assessment 均 CustomerMoveReady；通过 getCargoCurrentStation 查询实时 Source，验证 AtSlot、当前 outer cargo、最终 Target 当前为空且等于 legal drop、访问预留无冲突、有向载货距离有限非负，以及假想取放后 No-hole。绝不使用 task.PickupStation。旧 assessment 失效时返回 infeasible，不执行 Pickup/Dropoff，不标记 Completed。初始 CSV 仍禁止源终点相同；但阶段 7B 允许被 Relocation 临时放到自身最终 Slot 的 Future Cargo 通过显式同站点 Customer pickup/drop 周期完成任务，不能把 Relocation 本身视为完成。
+`buildCustomerMoveAction(task,assessment,state,data)` 新增动态正式搬运 Action。构造前重新 assess，要求旧/新 assessment 均 CustomerMoveReady；通过 getCargoCurrentStation 查询实时 Source，验证 AtSlot、当前 outer cargo、最终 Target 当前为空且等于 legal drop、访问预留无冲突、有向载货距离有限非负，以及假想取放后 No-hole。绝不使用 task.PickupStation。旧 assessment 失效时返回 infeasible，不执行 Pickup/Dropoff，不标记 Completed。初始已在 Target 的任务同样走零搬运完成；阶段 7C 已停用原地确认式 Customer Move，运行时 AlreadyAtFinalTarget 通过 terminal protection / FINALIZE 处理，Relocation 本身仍不完成 Customer。
 
 Customer Move 字段为 `ActionType="CUSTOMER_MOVE", ParentCustomerTaskID, CustomerTaskID, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, IsFeasible, Reason, CreatedFromSide="MAIN"`。三类 Runtime Action 共享基本搬运字段；RelocationKind、ProtectedFutureCargoID、RequiredFillingCountBefore 等扩展字段保留在各自 payload，不改阶段 5/6 接口。
 
@@ -164,17 +164,39 @@ Runtime pipeline：Customer Priority → Hard Eligibility → Assess → Build R
 
 Target reservation 保持整个运输阶段，保护原 LegalDropSlot。到达 Target 后若物理 Lane lock 忙，AGV 在 Lane 外 WaitingTarget，保留目标逻辑预约而不持有 Source lock；lock 释放后再开始 Dropoff。Dropoff 前及完成时检查目标空、owner、当前 legal drop 和 No-hole，不另选 Slot。完成后写目标、Cargo→AtSlot/CurrentStation=Target/AGVID=0，释放 Target reservation/lock，AGV→Idle。独立锁等待逻辑已有事件 helper 测试；端到端 baseline 的保守 footprint reservation 通常会提前排除同 Lane 竞争，因此不会为演示等待而削弱预约保护。
 
-只有 CUSTOMER_MOVE 在最终 Target Dropoff 后将 Parent 标为 Completed 并记录 taskFinishTime。RELOCATION/FILLING 不改变 Parent 或 Future Cargo 自身的任务完成状态，R_SELF 后仍 Pending。下一次直接按 CurrentStation 重新 assess，不维护永久 same-lane phase，不预生成清障或 Filling chain。为保证所有 Customer 完成时不遗留必要 child Move，Dispatcher 对正式 CUSTOMER_MOVE 使用 Parent completion barrier：本 Parent 已派发的准备 Move 未完成时先不 commit 正式搬运；这是 Running Move 生命周期检查，不产生任何静态 hard edge。Source blocker 之间仍在前一 Pickup 后立即流水处理，无需等待前一 Dropoff。
+CUSTOMER_MOVE 在最终 Target Dropoff 后将 Parent 标为 Completed 并记录 taskFinishTime；阶段 7C 另有零搬运 FINALIZE 完成路径。RELOCATION/FILLING 不改变 Parent 或 Future Cargo 自身的任务完成状态，R_SELF 后仍 Pending。下一次直接按 CurrentStation 重新 assess，不维护永久 same-lane phase，不预生成清障或 Filling chain。阶段 7C 已完全删除 Parent preparation completion barrier。同 Parent 的后续准备及 CUSTOMER_MOVE 仅由实时状态和资源决定，可以在前一个 preparation 仍运输时开始。所有 Customer 完成后，事件引擎继续收尾已派发 Move。
 
-边界：Future Cargo 的临时 Relocation 允许恰好落在其最终 Target，仍不表示 Customer 完成。后续显式 CUSTOMER_MOVE 执行同站点 Pickup/Dropoff 周期（loaded distance=0），其 Target 在 post-pickup 副本中判断；Source release 只释放不属于 Target 的 footprint，重叠区域以 Target reservation 保留。仅完成该 Customer Dropoff 后标 Completed。初始 CSV 的 SameStation 校验保持不变。
+边界：Future Cargo 的临时 Relocation 允许恰好落在其最终 Target，但不完成其 Customer Task。阶段 7C 改为该任务 eligible 后通过 FINALIZE 零搬运确认，彻底停用 Source==Target 的确认式 CUSTOMER_MOVE。已移除旧 SameStation 禁止规则，初始或运行时 AlreadyAtFinalTarget 均由 FINALIZE 处理。
 
 **WAIT/DEADLOCK**：不能派新 Action 但有 Running Move/未来事件时，推进最近事件并等待，WaitCount 计数，不误报 Deadlock。仅未完成 Customer 且没有 running/future event/可派发动作时返回 isDeadlocked=true，invalidCost 与详细 failureReason。diagnoseRuntimeDeadlock 保存逐任务 assessment、动作不可行原因、完整 Lane occupancy、reservation/lock；Running Move 却没有任何可释放资源的未来事件属于 AGV:RuntimeEventState 一致性错误，不静默判 Deadlock。运行时取放 invariant 失败报 AGV:RuntimeConsistency。
 
 输出兼容：旧 taskStartTime/taskPickupFinishTime/taskFinishTime、assignedAGV/assignedAGVID、taskTable/finalSequence 表示正式 Customer Move；taskTable.Pickup 是实际正式搬运 Source。result.moves 保存所有完整 ActionPayload 与事件状态，runningMoves 在正常结束时为空；moveTable 导出 MoveID、ReadyActionID、ActionType、RelocationKind、ParentTaskID、CargoID、AGVID、Source/Target、Dispatch/Pickup/Dropoff/CompletionTime、距离和 Filling 数量。eventLog 保留原六列，并新增 MoveID、ActionType、SourceReserved/TargetReserved、LaneOwner、CargoStatus、ParentStatus；Pickup/Dropoff 对所有 Move 都记录。finalState 提供最终 Warehouse/locks，finalSlotState 的旧 ReservedByTaskIndex 列作为兼容别名保留，并新增 ReservedByMoveID，owner 均为 MoveID。
 
-TotalMoveCount、RelocationCount、FillingCount、CustomerMoveCount 按已完成 Move 统计；距离包含三类 Move 的空载/载货距离，busy time 包含等待。Makespan=max(Customer taskFinishTime)，正常结束所有 Cargo AtSlot、AGV Idle、reservation/lock 全清。main 额外导出 *_moves.csv；HTML/GIF/Gantt 根据所有 Runtime Moves 回放，支持同一 Cargo 多次临时搬运，不再把固定 task.PickupStation 当执行端点。旧 assignAGV 的 task 参数兼容分支及初始输入校验仍可读取初始位置，正式执行链只传 Runtime Action。
+TotalMoveCount、RelocationCount、FillingCount、CustomerMoveCount 按已完成 Move 统计；距离包含三类 Move 的空载/载货距离，busy time 包含等待。CustomerCompletionMakespan=max(Customer taskFinishTime)，SystemMakespan 为所有已派发 Move 和 Customer 完全结束的 simulation time；makespan=SystemMakespan，用于 evaluateSequence/Cmax。正常结束所有 Cargo AtSlot、AGV Idle、reservation/lock 全清。main 额外导出 *_moves.csv；HTML/GIF/Gantt 根据所有 Runtime Moves 回放，支持同一 Cargo 多次临时搬运，不再把固定 task.PickupStation 当执行端点。旧 assignAGV 的 task 参数兼容分支及初始输入校验仍可读取初始位置，正式执行链只传 Runtime Action。
 
 阶段 7B 不实现 Top-K、H-step、Memetic、动态新任务重优化或主动 Relocation+Filling 协同优化。
+
+### Source-release pipeline 与 Already-at-Final-Target（阶段 7C）
+
+Runtime Move：Dispatch → Reserve Source + Target → Lock Source only when operating → Pickup → Release Source immediately → Loaded Travel（Target reservation remains）→ Lock Target only when operating → Dropoff → Release Target。**Reservation != Lane Lock**。沿用 handling 完成即退出 Lane 的零独立 exit-time 模型，Source reservation/lock 在 Pickup 完成后立即释放，Target reservation 保留到 Dropoff/exit，Target lock 只覆盖实际操作；Source 不因运输/等待而继续持有。
+
+已删除 simulateSchedule 中按相同 ParentCustomerTaskID 扫描 Running preparation 并跳过 CUSTOMER_MOVE 的逻辑。Preparation 不需要完整 Dropoff 才允许 Parent 后续 Action：任何类型 Cargo 完成 Pickup 后，occupancy/CurrentStation/Status 和源资源变化立即生效，重新 assess/build ReadySet。只有实时 Cargo 状态、outer、legal drop、hard eligibility、reservation/lock 和可达性限制后续动作；不保留或变相恢复 Parent barrier，也不改 hard edges。
+
+`assessCustomerTask` 新增 `AlreadyAtFinalTarget`、`FinalizeReady`。尚未 Completed 的 Cargo 为 AtSlot、CurrentStation 等于自身 final Target，且 occupancy 一致时进入独立 Already-at-final 分支，不将自己误判为 R_TARGET，也不因占用自己的目标要求 R_SELF。更深处有 unfinished Customer Cargo 时仍返回当前 outer 的 `R_FUTURE/TERMINAL_PROTECTION`，保留 ProtectedFutureCargoID；深处 Completed Cargo 不主动移动。
+
+No-hole 仍是硬约束：若该 C 本身挡在更深 Future Cargo 前面，当前真正可搬的 outer 可能就是 C。必须先把 C 临时移走，不能越过 C 直接抽取深层 Cargo；C 离开后 AlreadyAtFinalTarget=false，后续按实时位置继续准备和搬运。只有 C 仍在（或经合法后续 Move 再次到达）final Target，且保护需求消失时才能 FINALIZE，不会为满足日志序列而传送 C 或伪造完成。
+
+`buildFinalizeAction(task,assessment,state,data)` 构造 `ActionType="FINALIZE"` 的零搬运 Runtime Action，具有 Parent/CustomerTaskID、CargoID、实时 Source/Target、LoadedDistance=0、IsFeasible/Reason、CreatedFromSide=MAIN。它只读且不创建 Move。若该 Cargo 已有尚未完成 Pickup 的 Move reservation，则暂不冻结 Cargo，避免把已预约待搬的货物提前标为 Completed；不因其他无冲突 AGV 忙碌而等待。
+
+FINALIZE 按 ParentPriorityRank 进入 ReadySet，Collector 先检查 ReleaseTime 和现有 Target/business hard predecessor。Dispatcher 即使所有 AGV Busy 也继续扫描 FINALIZE；不调用 assignAGV、不申请 Source/Target reservation/lock，不创建 MoveID、不产生 Pickup/Dropoff 或 travel/handling time。每次成功 Finalize 后同 timestamp 重新 build ReadySet，已完成 Parent 不再生成新 child Action。
+
+`applyCustomerFinalize(action,state,data,currentTime,businessEdges)` 在执行前重新检查 Pending、ReleaseTime、hard predecessors、AtSlot、CurrentStation/occupancy、terminal protection 和 FinalizeReady。成功仅更新 state.taskStatus 和 taskCompletionTime；不修改 occupancy、Cargo.CurrentStation/Status、AGV 或任何资源。完成后由既有 Completed Cargo 保护机制禁止再次搬动。Relocation 落在自己的最终目标仍不自动完成，其任务必须单独通过上述资格和优先级处理。
+
+日志与指标：finalizeLog 单独记录 Time、TaskID、CargoID、TargetStation、BusyAGVCount、ParentPriorityRank、ReadyActionID，main 导出 *_finalize.csv。FinalizeCount 单独计数，不增加 TotalMoveCount/RelocationCount/FillingCount/CustomerMoveCount。finalized task 的 assignedAGV=0、PickupFinishTime=NaN，CompletionType=FINALIZE；正式搬运任务为 CompletionType=CUSTOMER_MOVE。
+
+CustomerCompletionMakespan 是最后一个 Customer taskCompletionTime；SystemMakespan 是所有已派发 Runtime Move、Customer、AGV 载货及 reservation/lock 完全结束的最终时刻。兼容字段 makespan 采用 SystemMakespan，evaluateSequence 因而评价系统 Cmax；agvUtilization 分母也采用系统时间。Customer 完成后不新建其 child，但必须继续处理已有 Move 到 Dropoff/资源释放，不能在 Customer 完成时强行退出或取消尾部运输。
+
+测试包含三 AGV 的 T B C 流水、Target clearing / R_FUTURE / Filling source 流水、Finalize eligibility 和 terminal protection、AGV 全 Busy 时 Finalize，以及 CustomerCompletionMakespan=100/SystemMakespan=120 的实际执行场景。阶段 7C 不实现 Top-K、H-step、Memetic、动态任务重优化或主动协同优化，不修改地图、路径或 Target/business hard precedence。
 
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。

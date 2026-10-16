@@ -21,6 +21,11 @@ payload.vehicles=arrayfun(@(k)struct('id',cfg.agvIDs(k),'station',cfg.agvInitial
 occupied=find(data.cargoInitial.CargoID~="");
 payload.cargo=arrayfun(@(k)struct('id',char(data.cargoInitial.CargoID(k)), ...
  'station',data.cargoInitial.StationMark(k)),occupied);
+if isfield(result,'finishTime') && isfinite(result.finishTime)
+ payload.duration=result.finishTime; % Includes a release-delayed zero-Move FINALIZE.
+end
+payload.customerTaskCount=height(tasks);
+payload.customerCompletionTimes=result.taskFinishTime(isfinite(result.taskFinishTime));
 if isfield(result,'moves')
  records=repmat(struct('id',0,'cargo','','pickup',0,'dropoff',0,'release',0, ...
   'vehicle',0,'from',0,'dispatchOrder',0,'start',[],'arrivePickup',[],'pickupFinish',[], ...

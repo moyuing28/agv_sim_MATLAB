@@ -14,14 +14,13 @@ r=simulateSchedule([1 2],t,d,cfg); assert(r.isFeasible && r.RelocationCount>=1);
 f=r.moveTable(r.moveTable.ActionType=="CUSTOMER_MOVE" & r.moveTable.CargoID=="F",:);
 assert(f.SourceStation~=102); audit(r,d,cfg);
 reloc=r.eventLog(r.eventLog.Event=="Dropoff" & r.eventLog.ActionType=="RELOCATION",:);
-assert(all(reloc.ParentStatus=="Pending"));
-% A Relocation at Future Cargo's final Slot is NOT completion: explicit Customer
-% pickup/drop confirms it and preserves overlapping target reservation at Pickup.
+assert(all(reloc.Time<r.taskFinishTime(2))); % Future Cargo's task is not completed by Relocation.
+% Relocation at Future Cargo's final Slot is NOT completion; a zero-Move FINALIZE follows.
 [d,t,cfg]=fixture(["M" "F"],strings(0,1),["M" "F"],[201 501],2);
 d=setDistance(d,102,501,1);
 r=simulateSchedule([1 2],t,d,cfg); assert(r.isFeasible);
 f=r.moveTable(r.moveTable.ActionType=="CUSTOMER_MOVE" & r.moveTable.CargoID=="F",:);
-assert(f.SourceStation==501 && f.TargetStation==501 && f.LoadedDistance==0); audit(r,d,cfg);
+assert(isempty(f) && r.FinalizeCount==1 && r.CustomerMoveCount==1); audit(r,d,cfg);
 % Rolling Filling executes one legal target at a time; Parent remains Pending.
 [d,t,cfg]=fixture("M",["A" "B"],"M",205,2); d=place(d,301,"O1"); d=place(d,302,"O2");
 r=simulateSchedule(1,t,d,cfg); assert(r.isFeasible && r.FillingCount==2 && r.CustomerMoveCount==1);
@@ -148,12 +147,12 @@ function d=setDistance(d,source,target,value)
 d.distanceMatrix(d.stationToIndex(source),d.stationToIndex(target))=value;
 end
 function audit(r,d,cfg)
-assert(r.isFeasible && r.makespan==max(r.taskFinishTime));
+assert(r.isFeasible && r.makespan==r.SystemMakespan && r.CustomerCompletionMakespan==max(r.taskFinishTime) && r.SystemMakespan>=r.CustomerCompletionMakespan);
 assert(numel(unique(r.moveTable.MoveID))==height(r.moveTable));
 assert(r.TotalMoveCount==height(r.moveTable) && r.RelocationCount==sum(r.moveTable.ActionType=="RELOCATION"));
 assert(r.TotalMoveCount==r.CustomerMoveCount+r.RelocationCount+r.FillingCount);
 assert(all(r.finalState.reservedBy==0) && all(r.finalState.laneLocks.MoveID==0));
-assert(all(r.finalCargoState.Status=="AtSlot") && r.CustomerMoveCount==height(r.taskTable));
+assert(all(r.finalCargoState.Status=="AtSlot") && r.CustomerMoveCount+r.FinalizeCount==height(r.taskTable));
 state=initializeCargoState(d); onboard=strings(cfg.numAGV,1); busy=zeros(cfg.numAGV,1); reserved=zeros(numel(state.slotMarks),1);
 locks=zeros(height(r.finalState.laneLocks),1); keys=r.finalState.laneLocks.PocketKey;
 for k=1:height(r.eventLog)

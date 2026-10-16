@@ -29,10 +29,13 @@ try
    writetable(r.finalSlotState,fullfile(cfg.resultsDir,[prefix '_slots.csv']));
    writetable(r.finalCargoState,fullfile(cfg.resultsDir,[prefix '_cargo.csv']));
    if isfield(r,'moveTable'), writetable(r.moveTable,fullfile(cfg.resultsDir,[prefix '_moves.csv'])); end
+   if isfield(r,'finalizeLog'), writetable(r.finalizeLog,fullfile(cfg.resultsDir,[prefix '_finalize.csv'])); end
   end
   fid=fopen(fullfile(cfg.resultsDir,[prefix '_status.txt']),'w');
   assert(fid>=0,'AGV:OutputFile','Cannot write result status.');
-  fprintf(fid,'Feasible=%d\nMakespan=%.6f\n%s\n',r.isFeasible,r.makespan,r.failureReason); fclose(fid);
+  fprintf(fid,'Feasible=%d\nMakespan=%.6f\n%s\n',r.isFeasible,r.makespan,r.failureReason);
+  fprintf(fid,'SystemMakespan=%.6f\nCustomerCompletionMakespan=%.6f\nFinalizeCount=%d\n', ...
+   r.SystemMakespan,r.CustomerCompletionMakespan,r.FinalizeCount); fclose(fid);
   if cfg.enableAnimation && isfield(r,'taskTable')
    exportScheduleAnimation(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.html']));
   end

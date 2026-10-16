@@ -47,4 +47,7 @@ for c=1:numel(state.cargo)
 end
 assigned=[payload.tasks.vehicle]~=0;
 state.completed=sum(time>=[payload.tasks(assigned).finish]);
+if isfield(payload,'customerCompletionTimes')
+ state.customerCompleted=sum(time>=payload.customerCompletionTimes);
+end
 end

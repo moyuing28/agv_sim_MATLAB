@@ -33,7 +33,8 @@ const colors=['#336be4','#159b83','#9859d1','#dc6570','#bb7b21','#457e8d'];
 const color=id=>colors[Math.max(0,D.vehicles.findIndex(v=>v.id===id))%colors.length];
 const fmt=x=>typeof x==='number'?x.toFixed(2):'—';
 const scheduled=D.tasks.filter(t=>t.vehicle!==0).sort((a,b)=>a.start-b.start||(a.dispatchOrder||0)-(b.dispatchOrder||0));
-const events=[...new Set([0,D.duration,...scheduled.flatMap(t=>[t.start,t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.finish])])].sort((a,b)=>a-b);
+const customerCompletionTimes=Array.isArray(D.customerCompletionTimes)?D.customerCompletionTimes:(typeof D.customerCompletionTimes==='number'?[D.customerCompletionTimes]:[]);
+const events=[...new Set([0,D.duration,...customerCompletionTimes,...scheduled.flatMap(t=>[t.start,t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.finish])])].sort((a,b)=>a-b);
 const vehicleTasks=new Map(D.vehicles.map(v=>[v.id,scheduled.filter(t=>t.vehicle===v.id)]));
 function svg(parent,tag,attrs={},label){const e=document.createElementNS(NS,tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);if(label!==undefined)e.textContent=label;parent.appendChild(e);return e;}
 function phase(t,time){
@@ -59,7 +60,7 @@ function snapshot(time){
   return {...v,from,to,ratio,status,cargo,progress,task:active};
  });
  const cargo=D.cargo.map(c=>{let station=c.station,onboard=false;for(const t of scheduled.filter(t=>t.cargo===c.id)){if(time>=t.finish){station=t.dropoff;continue;}if(time>=t.pickupFinish)onboard=true;break;}return {...c,station,onboard};});
- return {vehicles,cargo,completed:scheduled.filter(t=>time>=t.finish).length};
+ return {vehicles,cargo,completed:scheduled.filter(t=>time>=t.finish).length,customerCompleted:customerCompletionTimes.filter(t=>time>=t).length};
 }
 // Pure state reconstruction makes seeking backwards identical to forward playback.
 window.AGVReplay={data:D,snapshot,phase,events};
@@ -104,7 +105,7 @@ D.vehicles.forEach((v,i)=>{const y=40+i*46;svg($('timeline'),'text',{x:0,y:y+12,
 if(!scheduled.length)svg($('timeline'),'text',{x:250,y:50,fill:'#74839a','font-size':13},'没有已派单任务，可检查任务明细与受阻原因。');
 const cursor=svg($('timeline'),'line',{x1:left,x2:left,y1:22,y2:th-15,stroke:'#e45656','stroke-width':2});
 let time=0,playing=false,last=0;
-function render(){const s=snapshot(time);$('clock').textContent=`${fmt(time)} / ${fmt(D.duration)} s`;$('seek').value=time;$('summary').textContent=`已完成 ${s.completed} / ${D.tasks.length} 个任务`;
+function render(){const s=snapshot(time);$('clock').textContent=`${fmt(time)} / ${fmt(D.duration)} s`;$('seek').value=time;$('summary').textContent=`Customer ${s.customerCompleted} / ${D.customerTaskCount??D.tasks.length} · Move ${s.completed} / ${D.tasks.length}`;
  s.cargo.forEach((c,i)=>{const p=positions.get(c.station);cargoNodes[i].style.display=c.onboard?'none':'';cargoNodes[i].setAttribute('transform',`translate(${p.x},${p.y})`);});
  s.vehicles.forEach((v,i)=>{const a=positions.get(v.from),b=positions.get(v.to),x=a.x+(b.x-a.x)*v.ratio,y=a.y+(b.y-a.y)*v.ratio;const peers=s.vehicles.filter(o=>o.from===v.from&&o.to===v.to&&o.ratio===v.ratio),offset=peers.findIndex(o=>o.id===v.id)*38;vehicleNodes[i].g.setAttribute('transform',`translate(${x-18-offset},${y-25})`);vehicleNodes[i].load.style.display=v.cargo?'':'none';vehicleNodes[i].text.textContent=v.cargo||'';cards[i].status.textContent=v.status+(v.task?` · T${v.task.id}`:'');cards[i].detail.textContent=v.task?`${v.from} → ${v.to} · ${v.cargo||'空载'}`:`停在站点 ${v.from}`;cards[i].progress.hidden=!['装货','卸货'].includes(v.status);cards[i].bar.style.width=`${v.progress*100}%`;});
  routes.forEach(({el,t,empty})=>{const active=t.vehicle&&(empty?time>=t.start&&time<t.arrivePickup:time>=t.pickupFinish&&time<t.arriveDropoff);el.setAttribute('opacity',active?.9:.14);el.setAttribute('stroke-width',active?3:1.5);});

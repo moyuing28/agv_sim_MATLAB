@@ -13,14 +13,14 @@ source=getCargoCurrentStation(task.CargoID,state);
 if ~isfinite(source), return; end
 outer=getOuterCargo(fresh.SourcePocketKey,state,data);
 if isempty(outer) || outer.CargoID~=task.CargoID || outer.StationMark~=source, return; end
-% Same-station requests are excluded by the existing formal input contract.
-if source==task.DropoffStation
- action.Reason="Customer target must differ from source"; return;
-end
-[drop,seq,available]=getLegalDropSlot(fresh.TargetPocketKey,state,data);
+% Relocation may have landed a Future Cargo at its final Slot without completing
+% its Customer Task. An explicit same-Slot pickup/drop cycle still owns completion.
+dropState=state;
+if source==task.DropoffStation, dropState.occupancy(dropState.slotMarks==source)=""; end
+[drop,seq,available]=getLegalDropSlot(fresh.TargetPocketKey,dropState,data);
 if ~available || drop~=task.DropoffStation, return; end
 idx=find(state.slotMarks==drop);
-if numel(idx)~=1 || state.occupancy(idx)~="", return; end
+if numel(idx)~=1 || dropState.occupancy(idx)~="", return; end
 footprint=unique([source;drop;getSlotAccessStations(source,data);getSlotAccessStations(drop,data)]);
 [found,locks]=ismember(footprint,state.slotMarks);
 assert(all(found),'AGV:SlotState','Missing Customer Move access Slot.');

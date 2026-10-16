@@ -28,6 +28,7 @@ try
    writetable(r.eventLog,fullfile(cfg.resultsDir,[prefix '_events.csv']));
    writetable(r.finalSlotState,fullfile(cfg.resultsDir,[prefix '_slots.csv']));
    writetable(r.finalCargoState,fullfile(cfg.resultsDir,[prefix '_cargo.csv']));
+   if isfield(r,'moveTable'), writetable(r.moveTable,fullfile(cfg.resultsDir,[prefix '_moves.csv'])); end
   end
   fid=fopen(fullfile(cfg.resultsDir,[prefix '_status.txt']),'w');
   assert(fid>=0,'AGV:OutputFile','Cannot write result status.');

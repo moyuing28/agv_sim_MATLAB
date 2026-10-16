@@ -31,13 +31,18 @@ end
 state.cargo=payload.cargo;
 for c=1:numel(state.cargo)
  state.cargo(c).onboard=false;
- t=find(strcmp({payload.tasks.cargo},state.cargo(c).id) & [payload.tasks.vehicle]~=0,1);
- if isempty(t), continue; end
- r=payload.tasks(t);
- if time>=r.finish
-  state.cargo(c).station=r.dropoff;
- elseif time>=r.pickupFinish
-  state.cargo(c).onboard=true;
+ ids=find(strcmp({payload.tasks.cargo},state.cargo(c).id) & [payload.tasks.vehicle]~=0);
+ if isempty(ids), continue; end
+ [~,order]=sort([payload.tasks(ids).start]);
+ for t=reshape(ids(order),1,[])
+  r=payload.tasks(t);
+  if time>=r.finish
+   state.cargo(c).station=r.dropoff;
+  elseif time>=r.pickupFinish
+   state.cargo(c).onboard=true; break;
+  else
+   break;
+  end
  end
 end
 assigned=[payload.tasks.vehicle]~=0;

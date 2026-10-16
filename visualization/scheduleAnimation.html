@@ -58,7 +58,7 @@ function snapshot(time){
   }
   return {...v,from,to,ratio,status,cargo,progress,task:active};
  });
- const cargo=D.cargo.map(c=>{const t=D.tasks.find(t=>t.cargo===c.id&&t.vehicle);return {...c,station:t&&time>=t.finish?t.dropoff:c.station,onboard:!!(t&&time>=t.pickupFinish&&time<t.finish)};});
+ const cargo=D.cargo.map(c=>{let station=c.station,onboard=false;for(const t of scheduled.filter(t=>t.cargo===c.id)){if(time>=t.finish){station=t.dropoff;continue;}if(time>=t.pickupFinish)onboard=true;break;}return {...c,station,onboard};});
  return {vehicles,cargo,completed:scheduled.filter(t=>time>=t.finish).length};
 }
 // Pure state reconstruction makes seeking backwards identical to forward playback.

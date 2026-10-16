@@ -44,9 +44,9 @@ Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupSt
 
 同 Lane 先清 Source。Customer Cargo 暴露后，只在 state 副本中移除源货物并评估 Target。可立即合法回填时返回 CUSTOMER_MOVE；否则仅暴露 R_SELF，目标端的原因、Filling 数量等保留为 post-pickup 分析详情，不同时执行目标准备。R_SELF 不是完成任务；临时搬到别的 Lane 后，下次查询实时位置自然进入不同 Lane 模式，不维护 phase。Compact 模型下同 Lane 直接完成的边界是回到原 Slot；现有 CSV 校验仍禁止源终点相同的正式请求，单元测试直接验证此评估边界。
 
-`checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。当前旧模拟器事件执行仍用静态 PickupStation；本阶段不会执行 Relocation，因此动态位置仅在 assessment/可行性接口验证，后续执行层改造另行进行。
+`checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。阶段 7B 执行层已改为读取 Running Move 的动态 Source/Target；静态 PickupStation 只在初始输入校验与旧 assignAGV 参数兼容分支保留，不用于 Runtime Move 取放。
 
-阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。准备 Action 尚未接入正式 event engine，当前不可将整个模拟器视为已完成 v3.1 调度实现。
+阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。阶段 7B 已接入三类 Runtime Action 的 baseline 离散事件执行；尚未实现 Top-K/H-step/Memetic。
 
 ### Unified Relocation Action（阶段 5）
 
@@ -120,7 +120,7 @@ Nearest-loaded-distance 仅为 baseline，后续可替换为 Top-K + H-step look
 
 ### Unified Runtime Action + ReadySet（阶段 7A）
 
-Runtime flow：Customer Priority → Hard Predecessor Eligibility → assessCustomerTask → Build Current Runtime Actions → ReadySet →（下一阶段）Dispatcher → AGV Assignment。
+Runtime flow：Customer Priority → Hard Predecessor Eligibility → assessCustomerTask → Build Current Runtime Actions → ReadySet → Dispatcher → AGV Assignment（阶段 7B 已接入）。
 
 ```matlab
 % priority 是任务表行索引 1:N 的完整排列，不是 TaskID。
@@ -129,7 +129,7 @@ ready = buildReadyActions(tasks,customerPriorityOrder,state,data,currentTime,bus
 % ready.ActionPayload{k} 保留原始 CUSTOMER_MOVE / RELOCATION / FILLING struct。
 ```
 
-`buildCustomerMoveAction(task,assessment,state,data)` 新增动态正式搬运 Action。构造前重新 assess，要求旧/新 assessment 均 CustomerMoveReady；通过 getCargoCurrentStation 查询实时 Source，验证 AtSlot、当前 outer cargo、最终 Target 当前为空且等于 legal drop、访问预留无冲突、有向载货距离有限非负，以及假想取放后 No-hole。绝不使用 task.PickupStation。旧 assessment 失效时返回 infeasible，不执行 Pickup/Dropoff，不标记 Completed。同站点请求仍遵守既有正式输入契约，不构造搬运动作。
+`buildCustomerMoveAction(task,assessment,state,data)` 新增动态正式搬运 Action。构造前重新 assess，要求旧/新 assessment 均 CustomerMoveReady；通过 getCargoCurrentStation 查询实时 Source，验证 AtSlot、当前 outer cargo、最终 Target 当前为空且等于 legal drop、访问预留无冲突、有向载货距离有限非负，以及假想取放后 No-hole。绝不使用 task.PickupStation。旧 assessment 失效时返回 infeasible，不执行 Pickup/Dropoff，不标记 Completed。初始 CSV 仍禁止源终点相同；但阶段 7B 允许被 Relocation 临时放到自身最终 Slot 的 Future Cargo 通过显式同站点 Customer pickup/drop 周期完成任务，不能把 Relocation 本身视为完成。
 
 Customer Move 字段为 `ActionType="CUSTOMER_MOVE", ParentCustomerTaskID, CustomerTaskID, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, IsFeasible, Reason, CreatedFromSide="MAIN"`。三类 Runtime Action 共享基本搬运字段；RelocationKind、ProtectedFutureCargoID、RequiredFillingCountBefore 等扩展字段保留在各自 payload，不改阶段 5/6 接口。
 
@@ -148,7 +148,33 @@ ParentPriorityRank 是 Parent 在输入 priority 中的原始位置（较小优�
 
 ReadySet 只是“当前逻辑上可执行、可交给 Dispatcher 考虑的 Action 集合”，不是“已经派发 Action”。Generation 完全只读：不修改 occupancy、CurrentStation、Cargo Status、Customer Completed、AGV、reservedBy 或 Lane lock。独立 Builder 不负责 hard predecessor/ReleaseTime，这些逻辑资格统一由 Collector 先检查。
 
-不长期缓存 ReadySet。后续阶段 7B 应在 Pickup/Dropoff、Source Lane/预留释放、CurrentStation 变化、Relocation/Filling/Customer Move 完成、AGV idle、新任务到达等事件后重新构建。本阶段不添加 event hook，不接入 simulateSchedule，不实现 AGV Assignment、Dispatcher、Top-K、H-step 或 Memetic。
+不长期缓存 ReadySet。阶段 7B 已在初始化、每次 dispatch commit、Pickup/Dropoff/预留释放和 AGV idle 后重建。ReleaseTime 仍作为固定输入的释放时刻处理；不实现动态新任务重优化、Top-K、H-step 或 Memetic。
+
+### 多 AGV Runtime 离散事件执行（阶段 7B）
+
+Runtime pipeline：Customer Priority → Hard Eligibility → Assess → Build ReadySet → Dispatcher → Select Action → Assign AGV → Reserve Source/Target → Travel to Source → Pickup → Release Source → Loaded Travel → Wait outside Target if needed → Dropoff → Release Target → Update State → Rebuild ReadySet。
+
+沿用 simulateSchedule 单一事件时钟、原始有向距离、getTravelTime、cfg.pickTime/dropTime、容量一件的 AGV 状态。没有第二套模拟器、连续轨迹或新路径算法。createRuntimeMove 保存 ActionPayload 和冻结的 Source/Target；processRuntimeEvents 将原有 Pickup/Dropoff 更新扩展为所有 Action 共用的事件处理。每个 Move 保存一个 NextEventTime，时钟推进到最近事件或固定 ReleaseTime；同 timestamp 优先处理完成事件，再按 MoveID 稳定处理到达事件，清空零时长事件后才派发。
+
+**Dispatcher**：使用原始 Customer Priority（行索引 permutation），由阶段 4 Target/business hard eligibility 过滤，不恢复 Source precedence。按 ParentPriorityRank、ActionSideRank、ReadyActionID 扫描，资源不可 commit 或没有可达 Idle AGV 时继续扫描后续 Action。Action-first、AGV-second。assignAGV 复用既有时间参数，比较 empty travel + pickup + loaded travel + dropoff 的预计完成时间，平局选数值 AGVID 最小者。
+
+每 commit 一次立即重建 ReadySet，而不是给 N 台 Idle AGV一次分发旧集合前 N 行。新的 MoveID 递增唯一，作为 execution/reservation owner；ReadyActionID 仍是 snapshot 的逻辑标识，可在滚动清障中重复出现。同一个 Cargo、Source 或 Target 不会被两个 running moves 重复占用。新 reservation 会让低优 child builder 重选第二合法 Lane；不修改 baseline 候选评分或 Customer Priority。
+
+**Reservation != Lane Lock**。Dispatch 只记录 Running Move、建立 Source/Target access-footprint reservation、设置 AGV ActiveMoveID/状态和预计事件，不修改 occupancy。到 Source 才获得 Source Lane lock，处理 cfg.pickTime；Pickup 完成后验证 AtSlot、真实 Source、outer cargo、容量和 owner，清空源、Cargo→OnAGV/CurrentStation=NaN/AGVID，验证 No-hole，立即释放 Source lock 和 Source reservation。Source resource release at pickup completion, not at final dropoff。项目没有独立 exit duration，handling 完成即视为退出，退出耗时为 0；未改距离或添加虚构退出行驶时间。
+
+Target reservation 保持整个运输阶段，保护原 LegalDropSlot。到达 Target 后若物理 Lane lock 忙，AGV 在 Lane 外 WaitingTarget，保留目标逻辑预约而不持有 Source lock；lock 释放后再开始 Dropoff。Dropoff 前及完成时检查目标空、owner、当前 legal drop 和 No-hole，不另选 Slot。完成后写目标、Cargo→AtSlot/CurrentStation=Target/AGVID=0，释放 Target reservation/lock，AGV→Idle。独立锁等待逻辑已有事件 helper 测试；端到端 baseline 的保守 footprint reservation 通常会提前排除同 Lane 竞争，因此不会为演示等待而削弱预约保护。
+
+只有 CUSTOMER_MOVE 在最终 Target Dropoff 后将 Parent 标为 Completed 并记录 taskFinishTime。RELOCATION/FILLING 不改变 Parent 或 Future Cargo 自身的任务完成状态，R_SELF 后仍 Pending。下一次直接按 CurrentStation 重新 assess，不维护永久 same-lane phase，不预生成清障或 Filling chain。为保证所有 Customer 完成时不遗留必要 child Move，Dispatcher 对正式 CUSTOMER_MOVE 使用 Parent completion barrier：本 Parent 已派发的准备 Move 未完成时先不 commit 正式搬运；这是 Running Move 生命周期检查，不产生任何静态 hard edge。Source blocker 之间仍在前一 Pickup 后立即流水处理，无需等待前一 Dropoff。
+
+边界：Future Cargo 的临时 Relocation 允许恰好落在其最终 Target，仍不表示 Customer 完成。后续显式 CUSTOMER_MOVE 执行同站点 Pickup/Dropoff 周期（loaded distance=0），其 Target 在 post-pickup 副本中判断；Source release 只释放不属于 Target 的 footprint，重叠区域以 Target reservation 保留。仅完成该 Customer Dropoff 后标 Completed。初始 CSV 的 SameStation 校验保持不变。
+
+**WAIT/DEADLOCK**：不能派新 Action 但有 Running Move/未来事件时，推进最近事件并等待，WaitCount 计数，不误报 Deadlock。仅未完成 Customer 且没有 running/future event/可派发动作时返回 isDeadlocked=true，invalidCost 与详细 failureReason。diagnoseRuntimeDeadlock 保存逐任务 assessment、动作不可行原因、完整 Lane occupancy、reservation/lock；Running Move 却没有任何可释放资源的未来事件属于 AGV:RuntimeEventState 一致性错误，不静默判 Deadlock。运行时取放 invariant 失败报 AGV:RuntimeConsistency。
+
+输出兼容：旧 taskStartTime/taskPickupFinishTime/taskFinishTime、assignedAGV/assignedAGVID、taskTable/finalSequence 表示正式 Customer Move；taskTable.Pickup 是实际正式搬运 Source。result.moves 保存所有完整 ActionPayload 与事件状态，runningMoves 在正常结束时为空；moveTable 导出 MoveID、ReadyActionID、ActionType、RelocationKind、ParentTaskID、CargoID、AGVID、Source/Target、Dispatch/Pickup/Dropoff/CompletionTime、距离和 Filling 数量。eventLog 保留原六列，并新增 MoveID、ActionType、SourceReserved/TargetReserved、LaneOwner、CargoStatus、ParentStatus；Pickup/Dropoff 对所有 Move 都记录。finalState 提供最终 Warehouse/locks，finalSlotState 的旧 ReservedByTaskIndex 列作为兼容别名保留，并新增 ReservedByMoveID，owner 均为 MoveID。
+
+TotalMoveCount、RelocationCount、FillingCount、CustomerMoveCount 按已完成 Move 统计；距离包含三类 Move 的空载/载货距离，busy time 包含等待。Makespan=max(Customer taskFinishTime)，正常结束所有 Cargo AtSlot、AGV Idle、reservation/lock 全清。main 额外导出 *_moves.csv；HTML/GIF/Gantt 根据所有 Runtime Moves 回放，支持同一 Cargo 多次临时搬运，不再把固定 task.PickupStation 当执行端点。旧 assignAGV 的 task 参数兼容分支及初始输入校验仍可读取初始位置，正式执行链只传 Runtime Action。
+
+阶段 7B 不实现 Top-K、H-step、Memetic、动态新任务重优化或主动 Relocation+Filling 协同优化。
 
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
@@ -164,25 +190,25 @@ ReadySet 只是“当前逻辑上可执行、可交给 Dispatcher 考虑的 Acti
 ## 7. Cargo, Slot and AGV State
 Slot：occupancy 为 CargoID 或空字符串；reservedBy 是预留该货位的任务行索引。
 Cargo：CargoID、CurrentStation、AGVID、Status；装车后站点为 NaN，状态 OnAGV；卸货后在目标 Slot，状态 AtSlot。
-AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory、CargoID、ActiveTask。容量固定一件，只有完整卸货后才能接新任务。AGV 连续位置未建模；CurrentStation 在取货/卸货事件更新，不代表行驶途中实时位置。
+AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory、MoveHistory、CargoID、ActiveTask、ActiveMoveID、Status。TaskHistory 记录各 Move 的 Parent 行索引，MoveHistory 记录唯一 MoveID。容量固定一件，只有完整卸货后才能接新任务。AGV 连续位置未建模；CurrentStation 在取货/卸货事件更新，不代表行驶途中实时位置。
 
 ## 8. Current AGV Assignment Rule
 车辆为 AGV02→站点2、AGV03→站点4、AGV04→站点0、AGV05→站点3。速度及服务时间共用配置，车队同质。
-事件时刻扫描任务优先列表，找到可执行任务，在当前空闲车辆中使用 assignAGV 选择预计最早到达取货站的可达车辆；并列按配置排列。忙碌车辆不能提前接新任务。所有车忙碌时推进下一事件；无关巷道的任务可以并行。
+事件时刻按 ParentPriorityRank、ActionSideRank、ReadyActionID 扫描 ReadySet，先选择可派发 Action，再从 Idle AGV 中通过 assignAGV 选择预计完成时间最早者；并列按实际 AGVID 升序。高优 Action 暂不可达或资源冲突时继续扫描低优 Action。每成功 commit 一次都重建 ReadySet；忙碌车辆不提前接新 Move。
 这与旧版为未来可用车辆预先排队的分配模型不同，算法比较始终使用同一个当前规则。
 
 ## 9. Objective Function and Encoding
 sequence 是任务表行索引 1:N 的完整排列，不是 CargoID、TaskID 或 StationMark。evaluateSequence 返回 makespan，第二输出完整 result；不可行方案返回 invalidCost，不伪造完成。
-prioritySequence 为拓扑修复后的优先列表；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。遗传编码应使用完整优先排列，不能拿失败结果的部分 finalSequence 当完整染色体。
+prioritySequence 保留输入的 Customer 优先列表（hard eligibility 单独过滤，不重写 priority）；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。遗传编码应使用完整优先排列，不能拿失败结果的部分 finalSequence 当完整染色体。
 
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。
 
-旧规则“Source Lane 外层 Customer Task 必须先于内层 Customer Task”已经废弃。初始 Source、实时 CurrentStation、普通货物占用均不参与静态硬约束；Source blocking 由运行时 Relocation 解决（执行模块尚未实现）。**终端管硬顺序，源端管动态清障。**
+旧规则“Source Lane 外层 Customer Task 必须先于内层 Customer Task”已经废弃。初始 Source、实时 CurrentStation、普通货物占用均不参与静态硬约束；Source blocking 由运行时 Relocation 解决。**终端管硬顺序，源端管动态清障。**
 
 可选 businessEdges 是显式任务行索引边，默认 0×2；本阶段不新增业务 CSV 或配置系统。Target 与 business 边合并后统一由 validateTaskPrecedence 检查强连通分量和自环，存在环时报 AGV:CyclicTaskPrecedence，列出实际环内 TaskID/CargoID。重复最终 TargetStation 在输入加载阶段报 AGV:DuplicateCustomerTarget，列出目标站和冲突的 TaskID/CargoID。不同 Target PocketKey 不自动产生边，PocketName 仅用于显示。buildLaneConstraints 只保留为兼容 wrapper，转发到新函数，不存在第二套 Source 约束。
 任务派单时必须：货物在源站、目标为空、源外侧无货、目标外侧无货、访问货位未被其他任务预留。若任务从外侧搬到同巷道内侧，源货物在放货前已取走，不视为它对自身目的地的阻挡。
-第一版保守预留源站、目标站和两端所有外侧 Slot，直到该任务卸货完成才释放。这样避免两车争抢空位、行驶期间新放入货物封堵访问，但会限制部分同巷道并行；这是货位访问资源规则，不是交通冲突模型。
+两端仍使用端点及所有外侧 Slot 的 access-footprint reservation，owner 为 MoveID。Source 在 Pickup 完成/退出后立即释放；Target 持续保护至 Dropoff 完成/退出。独立 Lane lock 仅表示 AGV 正在实际 handling，不等于全程 reservation。
 Dispatch：预留访问货位并标记 AGV 忙碌；不提前移动库存。
 Pickup：在空载行驶+Pick 完成时，源站变空，货物装上 AGV。
 Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释放预留。
@@ -210,7 +236,7 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 - simulator/simulateSchedule.m：派单/Pickup/Dropoff 事件推进与输出。
 - simulator/evaluateSequence.m：统一优化目标接口。
 - simulator/repairSequence.m、checkTaskFeasible.m：优先拓扑修复、固定前置检查。
-- simulator/assignAGV.m：固定最早到达分车规则，调用方仅传当前空闲车辆。
+- simulator/assignAGV.m：已选 Action 的最早预计完成分车规则，调用方仅传当前空闲车辆，AGVID 并列破同。
 - simulator/getTravelDistance.m、getTravelTime.m：有向查距、时间换算。
 - algorithms/fcfsSequence.m、randomSequence.m：输入行顺序、随机完整排列。
 - algorithms/algorithmTemplate.m：未来算法输出 bestSequence,bestFitness,history 的占位模板。
@@ -240,7 +266,7 @@ candidate = randperm(height(tasks));
 动态占用与阻挡会让不同优先级产生不同派单顺序或可行性；不能假设只做一次拓扑排序即可保证可行。
 
 ## 14. Known Assumptions
-固定有向距离、速度、Pick/Drop 时间；每 Slot 一件货，每 AGV 一件货；任务集每 CargoID 一次。无充电、实时交通、重量差异、额外临时挪货。访问货位全程保守预留；前置任务 Drop 完成释放后续任务。输入中的占用是真实初始状态，未列货名表示空位。
+固定有向距离、速度、Pick/Drop 时间；每 Slot 一件货，每 AGV 一件货；任务集每 CargoID 一次。无充电、实时交通、重量差异、额外临时挪货。Source/Target 分阶段释放保守访问预留；前置任务 Drop 完成释放后续任务。输入中的占用是真实初始状态，未列货名表示空位。
 
 ## 15. Known Data Notes
 145 unique stations、154 membership rows、34 physical pockets、65 unique Slots、21025 directed pairs、288 NaN；Station 5 isolated。Sequence=0 deepest，货物 CSV 按巷道名称与深度升序方便填写。

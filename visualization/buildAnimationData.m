@@ -21,6 +21,22 @@ payload.vehicles=arrayfun(@(k)struct('id',cfg.agvIDs(k),'station',cfg.agvInitial
 occupied=find(data.cargoInitial.CargoID~="");
 payload.cargo=arrayfun(@(k)struct('id',char(data.cargoInitial.CargoID(k)), ...
  'station',data.cargoInitial.StationMark(k)),occupied);
+if isfield(result,'moves')
+ records=repmat(struct('id',0,'cargo','','pickup',0,'dropoff',0,'release',0, ...
+  'vehicle',0,'from',0,'dispatchOrder',0,'start',[],'arrivePickup',[],'pickupFinish',[], ...
+  'arriveDropoff',[],'finish',[],'actionType','','parentTaskID',0),numel(result.moves),1);
+ for k=1:numel(result.moves)
+  m=result.moves(k); records(k).id=m.MoveID; records(k).cargo=char(m.CargoID);
+  records(k).pickup=m.SourceStation; records(k).dropoff=m.TargetStation; records(k).release=m.DispatchTime;
+  records(k).vehicle=m.AGVID; records(k).from=m.FromStation; records(k).dispatchOrder=m.MoveID;
+  records(k).start=m.DispatchTime; records(k).arrivePickup=m.PickupStartTime;
+  records(k).pickupFinish=m.PickupTime; records(k).arriveDropoff=m.DropoffStartTime;
+  records(k).finish=m.CompletionTime; records(k).actionType=char(m.ActionType);
+  records(k).parentTaskID=m.ParentCustomerTaskID;
+  payload.duration=max(payload.duration,m.CompletionTime);
+ end
+ payload.tasks=records; return;
+end
 records=repmat(struct('id',0,'cargo','','pickup',0,'dropoff',0,'release',0, ...
  'vehicle',0,'from',0,'dispatchOrder',0,'start',[],'arrivePickup',[],'pickupFinish',[], ...
  'arriveDropoff',[],'finish',[]),height(tasks),1);

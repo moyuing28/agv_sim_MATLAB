@@ -26,6 +26,7 @@ testTargetConstraints();
 testRelocationActions();
 testFillingActions();
 testReadyActions();
+testRuntimeExecution();
 
 % Five-slot No-hole cases, with shuffled map and cargo rows.
 lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...
@@ -87,16 +88,16 @@ assert(numel(gifInfo)>=2 && gifInfo(1).Width==640 && gifInfo(1).Height==360);
 isolated=testCfg; isolated.agvInitialStations=repmat(5,1,testCfg.numAGV);
 [f,bad]=evaluateSequence([1 2],tasks,data,isolated); assert(f==isolated.invalidCost && ~bad.isFeasible);
 
-% Moving existing outer cargo allows inner pickup, with full predecessor completion.
+% Future outer cargo can be relocated without completing its own Customer Task.
 cargo=putCargo(blank,[72 71],["INNER" "OUTER"]);
 [tasks,data]=loadFixture(cargo,taskInput(["INNER" "OUTER"],[21 10]),testData,testCfg);
-r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1]));
-assert(r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
+r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && r.RelocationCount>=1);
+assert(r.taskTable.Pickup(2)~=71); verifyEvents(r,data,testCfg);
 
 % Passive cargo blocks pickup; it is not omitted simply because it has no task.
 cargo=putCargo(blank,[72 71],["INNER" "BLOCKER"]);
 [tasks,data]=loadFixture(cargo,taskInput("INNER",10),testData,testCfg);
-[f,bad]=evaluateSequence(1,tasks,data,testCfg); assert(~bad.isFeasible && f==testCfg.invalidCost && contains(bad.failureReason,"Pickup blocked"));
+[f,r]=evaluateSequence(1,tasks,data,testCfg); assert(r.isFeasible && f==r.makespan && r.RelocationCount>=1); verifyEvents(r,data,testCfg);
 
 % Runtime obstruction after a valid compact initial state.
 cargo=putCargo(blank,[86 85],["MOVE" "BLOCKER"]);
@@ -109,8 +110,7 @@ expectError(@()checkCargoTaskFeasible(tasks(1,:),data,state),'AGV:InternalHole')
 % An occupied destination can become available through another requested move.
 cargo=putCargo(blank,[86 10],["INCOMING" "VACATE"]);
 [tasks,data]=loadFixture(cargo,taskInput(["INCOMING" "VACATE"],[10 21]),testData,testCfg);
-r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && isequal(r.finalSequence,[2 1]));
-assert(r.taskStartTime(1)>=r.taskFinishTime(2)); verifyEvents(r,data,testCfg);
+r=simulateSchedule([1 2],tasks,data,testCfg); assert(r.isFeasible && r.RelocationCount>=1); verifyEvents(r,data,testCfg);
 
 % Compact drop gate defers the outer destination until the inner move completes.
 cargo=putCargo(blank,[86 88],["OUTER_DEST" "INNER_DEST"]);
@@ -126,7 +126,7 @@ expectError(@()loadFixture(cargo,taskInput(["ONE" "TWO"],[10 10]),testData,testC
 cargo=putCargo(blank,85,"SELF");
 input=taskInput("SELF",63); input.ReleaseTime=30;
 [tasks,data]=loadFixture(cargo,input,testData,testCfg);
-r=simulateSchedule(1,tasks,data,testCfg); assert(~r.isFeasible && contains(r.failureReason,"temporary self relocation"));
+r=simulateSchedule(1,tasks,data,testCfg); assert(~r.isFeasible && r.isDeadlocked && contains(r.failureReason,"No feasible filling source lane"));
 % ReleaseTime is verified on a legal cross-Lane customer move.
 input=taskInput("SELF",10); input.ReleaseTime=30;
 [tasks,data]=loadFixture(cargo,input,testData,testCfg);

@@ -46,7 +46,7 @@ Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupSt
 
 `checkCargoTaskFeasible(task,data,state)` 保持三输出接口，以 assessment.CustomerMoveReady 为必要条件，再沿用原访问 footprint 和预留检查；非 Ready 时 reason 来自 assessment。assessment 本身不判断 Lane Lock、AGV、ReleaseTime 或 Business precedence。当前旧模拟器事件执行仍用静态 PickupStation；本阶段不会执行 Relocation，因此动态位置仅在 assessment/可行性接口验证，后续执行层改造另行进行。
 
-阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。准备动作仍未实现，当前不可将整个模拟器视为已完成 v3.1 调度实现。
+阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。准备 Action 尚未接入正式 event engine，当前不可将整个模拟器视为已完成 v3.1 调度实现。
 
 ### Unified Relocation Action（阶段 5）
 
@@ -80,6 +80,43 @@ Builder 重新 assess 以拒绝已过期请求，并在选择后再次检查实�
 Relocation 采用滚动生成：每次只生成当前一个 Action。Move 完成、Warehouse State 更新后必须重新 assess，才决定下一步，绝不提前保存整条清障链。测试用 `applyRelocationCompletion(action,state,data)` 要求货物仍 AtSlot、源与目标仍有效且无预留冲突；它模拟整个 Move 已完成的原子更新（不是 OnAGV/事件回调）：清空源 occupancy，写入目标 occupancy，更新 Cargo.CurrentStation/Status=AtSlot/AGVID=0，并验证全仓 No-hole。它不修改任何 Customer Task Status/Completed、预留或优先级，不接入 simulateSchedule。
 
 阶段 5 未实现 Filling、Relocation+Filling 合并、ReadySet、Dispatcher、AGV 分配、运行时 Relocation 事件执行、Top-K、H-step 或 Memetic；Target/Business 静态 hard precedence 保持不变。
+
+### Filling Action（阶段 6）
+
+Relocation 的方向是 Known Cargo → Choose Target Lane → LegalDropSlot Auto；Filling 则是 Known Target Slot → Choose Source Lane → Outer Cargo Auto。Filling 只搜索 Source Lane，不搜索 Cargo×Slot 组合。
+
+```matlab
+assessment = assessCustomerTask(parentTask,data,state);
+if assessment.TargetAction == "FILLING"
+    action = buildFillingAction(parentTask,assessment,state,data);
+    if action.IsFeasible
+        nextState = applyFillingCompletion(action,state,data); % 仅测试原子完成
+        nextAssessment = assessCustomerTask(parentTask,data,nextState);
+    end
+end
+```
+
+`state.customerTasks` 必须提供完整 Customer Task 目录。**Filling Cargo = Ordinary Cargo only**：CargoID 必须不属于任何 Customer Task，包括 Parent、Pending、Future、InProgress 和 Completed；此规则不依赖任务 Status。Relocation 因真正挡路可以临时搬动 Future Cargo，Filling 是主动选货补结构，因此不允许选择任何 Customer Cargo。
+
+分层接口：
+
+- `getFillingTarget(parentTask,assessment,state,data)`：统一验证 Parent/assessment 身份，重新 assess；只有仍为 FILLING，且 NextFillingStation 与当前 Parent Target Lane 唯一 LegalDropSlot 一致才返回目标。不能由调用方另选 Slot。
+- `[candidates,reason] = getFillingCandidateSourceLanes(parentTask,assessment,state,data)`：枚举全部 Storage PocketKey（仅 Slot）。每条非空 Source Lane 只对应实时 outer cargo；排除 Filling Target Lane、任何 Customer Cargo、非 AtSlot/实时位置与 occupancy 不一致、源/目标访问 footprint 预留冲突，以及有向距离 NaN/Inf/负值的候选。源端及目标端都沿用端点加入口方向全部 Slot 的现有预留语义，不新增或修改 reservation。
+- `selectFillingSourceLaneBaseline(candidates)`：选择 LoadedDistance 最小行；并列按字符串 SourcePocketKey、SourceStation 升序，deterministic，不使用随机数。
+- `buildFillingAction(parentTask,assessment,state,data)`：构造 ONE Filling Action，选择后重新检查 assessment、Source 和 Target；不生成整条 Filling chain，不改变 Customer priority 或 hard edges。
+- `applyFillingCompletion(action,state,data)`：测试/后续复用的完整 Move 原子更新 helper，尚未接入 simulateSchedule；要求 cargo 仍 AtSlot、Source/Target 及访问预留仍合法，不是正在运输的事件回调。
+
+Candidate table 列为 `SourcePocketKey, SourcePocketName, CargoID, SourceStation, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, RemainingSourceCargoCount`；最后一项是取走该 outer cargo 后 Source Lane 的剩余货物数。Lane 深度来自真实 map，不假定统一长度。候选生成会在 state 副本模拟源空/目标有货，并验证全仓 No-hole。
+
+Action 字段为 `ActionType="FILLING", ParentCustomerTaskID, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, IsFeasible, Reason, CreatedFromSide="TARGET", RequiredFillingCountBefore`。ParentCustomerTaskID 表示正在推进的 Customer Task，不创建新的 Customer Task。
+
+没有合法 Source 时返回 `IsFeasible=false, Reason="No feasible filling source lane"`，不退而选用 Customer Cargo，也不判全局 Deadlock。旧 assessment 的 TargetAction/NextFillingStation 已变化，或伪造了 Filling Target 时，返回 `IsFeasible=false, Reason="Stale assessment"`。原输入不是 FILLING 或不属于 Parent，报 `AGV:FillingAssessment`；缺完整目录报 `AGV:TaskState`。Completion 前再发现 Source、Target、普通货物身份或预留条件已变化，报 `AGV:StaleFillingAction`，不返回部分更新。
+
+Filling Source 不能是 Target Lane：取走同 Lane outer 会使 frontier 后退，原 NextFillingStation 不再是 legal drop，放入将产生空洞。Parent 当前 Source Lane 则不机械排除：如果 outer 是普通 blocker，可正常用于 Filling，SourceReady 在之后重新 assess 时自然变化；如果 outer 是 Future/其他 Customer Cargo，仍禁止。Source 深处存在 Future/Completed Cargo 不导致整条 Lane 排除，只要实际取出的 outer 是普通货物且其他检查通过。
+
+Filling 同样采用 rolling one-action generation：Build ONE Filling → Complete → Update state → Re-assess → Build next Filling if needed。例如需填两个位置，第一次只填当前 LegalDrop；重新 assess 后数量由 2 变 1，再构造下一次，最后 TargetReady=true。Completion 同时清空源 occupancy、写目标 occupancy、更新 CurrentStation/Status=AtSlot/AGVID=0，并验证 No-hole；不修改任何 Customer Task Status/Completed、预留或任务目录。
+
+Nearest-loaded-distance 仅为 baseline，后续可替换为 Top-K + H-step lookahead。阶段 6 不接入主循环，不实现 ReadySet、多 AGV Dispatcher、主动 Relocation+Filling 合作评分、Top-K、H-step 或 Memetic；普通 Source blocker 顺便被清除只是合法状态变化，不增加特殊 ActionType 或奖励。
 
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。

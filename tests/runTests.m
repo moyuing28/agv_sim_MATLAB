@@ -23,6 +23,7 @@ testLaneHelpers(testData,blank);
 addpath(fullfile(projectRoot,'tests'));
 testCustomerAssessment();
 testTargetConstraints();
+testRelocationActions();
 
 % Five-slot No-hole cases, with shuffled map and cargo rows.
 lane=table(repmat("A",5,1),repmat("TEST",5,1),(0:4)',(901:905)',repmat("Slot",5,1), ...

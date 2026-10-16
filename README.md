@@ -48,6 +48,39 @@ Source 使用 `getCargoCurrentStation` 的实时位置，不读 Initial PickupSt
 
 阶段 4 已删除旧 Source precedence：Customer Task hard precedence 只来自最终 Target placement 与显式 business precedence（如有）。准备动作仍未实现，当前不可将整个模拟器视为已完成 v3.1 调度实现。
 
+### Unified Relocation Action（阶段 5）
+
+`R_SOURCE / R_TARGET / R_FUTURE / R_SELF` 统一为 `ActionType="RELOCATION"`，对应 `RelocationKind` 分别为 `SOURCE_CLEARING / TARGET_CLEARING / TERMINAL_PROTECTION / SELF_TEMPORARY`。区别在清障原因及 assessment 所属端，不使用四套搬运算法。
+
+调用流程：Known Cargo → Query Real-time Source → Verify Cargo Accessible → Generate Feasible Target Lane Candidate Set → Select One Target Lane → LegalDropSlot Automatically Determined → Build One Relocation Action。
+
+```matlab
+assessment = assessCustomerTask(parentTask,data,state);
+% 明确选择一端，不在 Builder 内实现 Target/Source 调度排序。
+action = buildRelocationAction(parentTask,assessment,"SOURCE",state,data);
+% TARGET 对应 R_TARGET/R_FUTURE；MAIN 对应 R_SELF；FILLING 不受理。
+if action.IsFeasible
+    nextState = applyRelocationCompletion(action,state,data); % 仅测试原子完成
+    nextAssessment = assessCustomerTask(parentTask,data,nextState);
+end
+```
+
+Relocation 接口要求 `state.customerTasks` 是完整 Customer Task 目录，以防漏掉 Completed Cargo；`state.taskStatus` 按目录行对齐并优先于目录 Status。`getRelocationSource(cargoID,state,data)` 统一查询实时 CurrentStation，确认 AtSlot、真实 Slot、当前 outer cargo，以及 Cargo 状态与 occupancy 一致。不可直接取时报 `AGV:RelocationCargoNotAccessible`，已完成货物报 `AGV:CompletedCargoBlocked`，缺任务目录报 `AGV:TaskState`。
+
+`getRelocationCandidateLanes(cargoID,parentTask,kind,state,data)` 遍历所有真实 Storage PocketKey（仅 Slot），返回全部可行目标，而非直接挑最近的一条。表列为 `PocketKey, PocketName, DropStation, DropSequence, LoadedDistance, RemainingCapacity, IsParentTargetLane`；RemainingCapacity 表示本次假想放入后的剩余空 Slot 数。每条 Lane 自动绑定当前唯一 LegalDropSlot，不在 Lane 内另选位置。
+
+硬过滤包括：当前 Source Lane、满 Lane、无有效/空的 LegalDropSlot、源/目标访问 footprint 的任何非零 reservation、无法保持 No-hole 的状态，以及 Source→DropStation 有向距离非有限或不可达。沿用现有保守预留语义，访问范围仍是端点及其入口方向所有 Slot；不修改或忽略现有预留，也不预先移动其他货物。SOURCE_CLEARING 额外排除 Parent 最终 Target Lane，避免重新破坏其 Target Preparation。候选 Lane 内有 Future 或深层 Completed Cargo，本身不是排除理由；禁止的是搬动 Completed Cargo。
+
+`selectRelocationLaneBaseline(candidates)` 独立选择 LoadedDistance 最小行，距离相同按字符串 PocketKey 升序，再按 DropStation 升序，结果 deterministic。它只选择 Lane；Target Slot 使用候选行已绑定的位置。Nearest Loaded Distance 仅为当前 baseline，后续可替换为 Top-K + H-step Lookahead，本阶段未实现。
+
+`buildRelocationAction(parentTask,assessment,side,state,data)` 每次只返回一个 struct：`ActionType, RelocationKind, ParentCustomerTaskID, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetPocketName, TargetSequence, LoadedDistance, IsFeasible, Reason, ProtectedFutureCargoID, CreatedFromSide`。ParentCustomerTaskID 始终是被推进的 Parent，而不是被搬 Future Cargo 自己的任务。TERMINAL_PROTECTION 另外保留 ProtectedFutureCargoID；它可能不同于实际搬运的 CargoID。
+
+Builder 重新 assess 以拒绝已过期请求，并在选择后再次检查实时 Source 与 Candidate 合法性。无候选时返回 `IsFeasible=false, Reason="No feasible relocation target lane"`，目标数值为 NaN，不判全局 DEADLOCK。过期 assessment 返回 infeasible；对非法取货和 Completed Cargo 则明确报错。
+
+Relocation 采用滚动生成：每次只生成当前一个 Action。Move 完成、Warehouse State 更新后必须重新 assess，才决定下一步，绝不提前保存整条清障链。测试用 `applyRelocationCompletion(action,state,data)` 要求货物仍 AtSlot、源与目标仍有效且无预留冲突；它模拟整个 Move 已完成的原子更新（不是 OnAGV/事件回调）：清空源 occupancy，写入目标 occupancy，更新 Cargo.CurrentStation/Status=AtSlot/AGVID=0，并验证全仓 No-hole。它不修改任何 Customer Task Status/Completed、预留或优先级，不接入 simulateSchedule。
+
+阶段 5 未实现 Filling、Relocation+Filling 合并、ReadySet、Dispatcher、AGV 分配、运行时 Relocation 事件执行、Top-K、H-step 或 Memetic；Target/Business 静态 hard precedence 保持不变。
+
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
 

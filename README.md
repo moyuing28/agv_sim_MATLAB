@@ -118,6 +118,38 @@ Filling 同样采用 rolling one-action generation：Build ONE Filling → Compl
 
 Nearest-loaded-distance 仅为 baseline，后续可替换为 Top-K + H-step lookahead。阶段 6 不接入主循环，不实现 ReadySet、多 AGV Dispatcher、主动 Relocation+Filling 合作评分、Top-K、H-step 或 Memetic；普通 Source blocker 顺便被清除只是合法状态变化，不增加特殊 ActionType 或奖励。
 
+### Unified Runtime Action + ReadySet（阶段 7A）
+
+Runtime flow：Customer Priority → Hard Predecessor Eligibility → assessCustomerTask → Build Current Runtime Actions → ReadySet →（下一阶段）Dispatcher → AGV Assignment。
+
+```matlab
+% priority 是任务表行索引 1:N 的完整排列，不是 TaskID。
+% currentTime 默认 0；businessEdges 默认 0x2，沿用阶段 4 的行索引边。
+ready = buildReadyActions(tasks,customerPriorityOrder,state,data,currentTime,businessEdges);
+% ready.ActionPayload{k} 保留原始 CUSTOMER_MOVE / RELOCATION / FILLING struct。
+```
+
+`buildCustomerMoveAction(task,assessment,state,data)` 新增动态正式搬运 Action。构造前重新 assess，要求旧/新 assessment 均 CustomerMoveReady；通过 getCargoCurrentStation 查询实时 Source，验证 AtSlot、当前 outer cargo、最终 Target 当前为空且等于 legal drop、访问预留无冲突、有向载货距离有限非负，以及假想取放后 No-hole。绝不使用 task.PickupStation。旧 assessment 失效时返回 infeasible，不执行 Pickup/Dropoff，不标记 Completed。同站点请求仍遵守既有正式输入契约，不构造搬运动作。
+
+Customer Move 字段为 `ActionType="CUSTOMER_MOVE", ParentCustomerTaskID, CustomerTaskID, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, IsFeasible, Reason, CreatedFromSide="MAIN"`。三类 Runtime Action 共享基本搬运字段；RelocationKind、ProtectedFutureCargoID、RequiredFillingCountBefore 等扩展字段保留在各自 payload，不改阶段 5/6 接口。
+
+`buildReadyActions` 每次从当前 snapshot 完整重建，流程如下：
+
+- 按输入 priority 的任务行顺序遍历完整 Customer Task 表。优先使用 state 中实时状态，按 TaskID 对齐 state.customerTasks 目录；若无目录则将输入 tasks 作为完整目录，仅在局部副本中附加。输入任务及 state 均不修改。
+- 只处理 Pending（兼容 NOT_COMPLETED）Parent；Completed、InProgress、PickedUp 等不重复暴露动作。ReleaseTime 尚未到达的任务跳过。Target/business hard predecessor 必须全部 Completed，未满足时该 Parent 的所有准备/正式动作都跳过，不因 Priority 高就提前准备。
+- 不同 Lane 可同时贡献 Target-side R_TARGET/R_FUTURE/FILLING 和 Source-side R_SOURCE；两端分别调用已有 Builder，只有 IsFeasible=true 的动作才收集。无合法 Relocation/Filling 候选则省略该动作，不判 DEADLOCK，不完成 Parent。
+- CustomerMoveReady 时该 Parent 只贡献 CUSTOMER_MOVE；R_SELF 时只贡献 SELF_TEMPORARY Relocation；CARGO_IN_TRANSIT 不生成重复动作。`validateRuntimeAssessment` 对 CustomerMoveReady 同时声称 preparation、或 R_SELF/运输中同时声称 preparation 等矛盾状态报 `AGV:RuntimeAssessment`。
+
+ReadySet 是 table，列为 `ReadyActionID, ActionType, ParentCustomerTaskID, ParentPriorityRank, ActionSide, ActionSideRank, CargoID, SourceStation, SourcePocketKey, SourceSequence, TargetStation, TargetPocketKey, TargetSequence, LoadedDistance, ActionPayload`。ActionPayload 为 cell，保存原始 Action struct。ReadyActionID 采用 `T<TaskID>_<Side>_<ActionType>`，当前生成中唯一，同一任务/侧别/类型在同一 snapshot 重建时稳定；它不是 Customer TaskID，也不是跨时间的派发实例号。
+
+ParentPriorityRank 是 Parent 在输入 priority 中的原始位置（较小优先），不会给 child action 新建 Customer Priority，也不会因部分任务被过滤而重新压缩 rank。ActionSideRank 为 MAIN=0、TARGET=1、SOURCE=2；同 Parent 的 TargetPrep 优先只是软偏好，不是 hard edge，两个无冲突动作都能保留。跨 Parent 首先比较 ParentPriorityRank。
+
+`normalizeReadyActions` 按 ParentPriorityRank、ActionSideRank、ReadyActionID 升序做 deterministic greedy normalization：同 Cargo、同 SourceStation、同 TargetStation 的冲突只保留高优先级动作。只与已保留动作比较，暂时移除不代表失败，下一次 rebuild 可以再出现；不尝试重新选择 baseline 候选或全局最大匹配。共享 PocketKey/Lane 本身不是去重条件，后续 Dispatcher 再判断 Lane lock 和并行资源。
+
+ReadySet 只是“当前逻辑上可执行、可交给 Dispatcher 考虑的 Action 集合”，不是“已经派发 Action”。Generation 完全只读：不修改 occupancy、CurrentStation、Cargo Status、Customer Completed、AGV、reservedBy 或 Lane lock。独立 Builder 不负责 hard predecessor/ReleaseTime，这些逻辑资格统一由 Collector 先检查。
+
+不长期缓存 ReadySet。后续阶段 7B 应在 Pickup/Dropoff、Source Lane/预留释放、CurrentStation 变化、Relocation/Filling/Customer Move 完成、AGV idle、新任务到达等事件后重新构建。本阶段不添加 event hook，不接入 simulateSchedule，不实现 AGV Assignment、Dispatcher、Top-K、H-step 或 Memetic。
+
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
 

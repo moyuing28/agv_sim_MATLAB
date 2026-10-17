@@ -110,6 +110,19 @@ r=buildReadyActions(tasks,[1 2],s,d); assert(height(r)==1 && r.ParentCustomerTas
 [d,s,t]=fixture(["M" "B"],strings(0,1),0); s=place(s,d,601,"N"); s=place(s,d,602,"C"); s=addTask(s,"N",501);
 d=distance(d,102,301,1); d=distance(d,602,301,1);
 r=buildReadyActions(s.customerTasks,[2 1],s,d); assert(height(r)==1 && r.CargoID=="C");
+% Stage 8.1: same-cargo FILLING + SOURCE_CLEARING collapse to the FILLING only.
+[d,s,t]=fixture(["M" "B"],["A"],2); s=place(s,d,301,"O");
+d=distance(d,301,202,1); % O is strictly nearer than B for the baseline.
+a=assessCustomerTask(t,d,s);
+assert(a.SourceAction=="R_SOURCE" && a.SourceActionCargoID=="B" && a.TargetAction=="FILLING");
+fill=buildFillingAction(t,a,s,d);
+rel=buildRelocationAction(t,a,"SOURCE",s,d);
+assert(fill.IsFeasible && fill.CargoID=="B" && fill.SourceStation==102 && fill.TargetStation==202);
+assert(rel.IsFeasible && rel.RelocationKind=="SOURCE_CLEARING" && rel.CargoID=="B");
+r=buildReadyActions(t,1,s,d);
+q=r(r.ParentCustomerTaskID==t.TaskID & r.CargoID=="B",:);
+assert(height(q)==1 && q.ActionType=="FILLING" && q.SourceStation==102 && q.TargetStation==202);
+assert(~any(r.ActionType=="RELOCATION" & r.CargoID=="B"));
 % Contradictory assessments are internal errors, not quietly coerced.
 [d,s,t]=fixture("M",strings(0,1),0); a=assessCustomerTask(t,d,s); a.SourceAction="R_SOURCE";
 expect(@()validateRuntimeAssessment(a),'AGV:RuntimeAssessment');

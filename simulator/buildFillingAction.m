@@ -7,6 +7,14 @@ action=struct('ActionType',"FILLING",'ParentCustomerTaskID',parentTask.TaskID,'C
  'RequiredFillingCountBefore',NaN);
 [candidates,reason]=getFillingCandidateSourceLanes(parentTask,assessment,state,data);
 selected=selectFillingSourceLaneBaseline(candidates);
+% Cooperation: if the Parent's own Source blocker is an ordinary, eligible
+% Filling source, prefer it over the nearest baseline so this single FILLING
+% move also clears the Source. The re-validation below still applies and
+% silently falls back to the baseline whenever the blocker is not a legal candidate.
+if assessment.SourceAction=="R_SOURCE"
+ hit=find(candidates.CargoID==assessment.SourceActionCargoID,1);
+ if ~isempty(hit), selected=candidates(hit,:); end
+end
 if isempty(selected), action.Reason=reason; return; end
 % Re-assess and regenerate before returning: no old Slot/Cargo is trusted.
 [current,reason]=getFillingCandidateSourceLanes(parentTask,assessment,state,data);

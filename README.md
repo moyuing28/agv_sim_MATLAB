@@ -198,6 +198,16 @@ CustomerCompletionMakespan 是最后一个 Customer taskCompletionTime；SystemM
 
 测试包含三 AGV 的 T B C 流水、Target clearing / R_FUTURE / Filling source 流水、Finalize eligibility 和 terminal protection、AGV 全 Busy 时 Finalize，以及 CustomerCompletionMakespan=100/SystemMakespan=120 的实际执行场景。阶段 7C 不实现 Top-K、H-step、Memetic、动态任务重优化或主动协同优化，不修改地图、路径或 Target/business hard precedence。
 
+### Relocation + Filling Cooperation（阶段 8.1）
+
+当同一 Parent 同时存在 `TargetAction=="FILLING"`（目标 Lane 需要填充）与 `SourceAction=="R_SOURCE"`（源被阻挡）时，`buildFillingAction` 在 `selectFillingSourceLaneBaseline` 的最近距离 baseline 之上增加一层协同优先：若 `assessment.SourceActionCargoID`（源阻挡货物）当前是合法 Filling candidate，则 Filling 直接选择该阻挡货物。这样一次 FILLING Move 在物理上同时完成“清源”与“填缝”，随后 `normalizeReadyActions` 按 CargoID 冲突去掉多余的 SOURCE_CLEARING，不会重复搬运。
+
+触发条件严格限定为：`SourceAction == "R_SOURCE"` 且阻挡货物出现在 `getFillingCandidateSourceLanes` 的合法候选中。阻挡货物属于任何 Customer Cargo（含 Future/Completed/Pending/InProgress）、已不在 Source outer、被 reservation、不可达、No-hole 不通过或任一现有 Filling 约束不满足时，协同偏好自动失效，完整回退到原来的最近距离 Filling 选择；此时 SOURCE_CLEARING Relocation 仍按原路径独立生成。
+
+该改动只影响 Filling 的 Source 选择偏好，不新增 ActionType，协同 Move 仍记录为 `FILLING`。Future Cargo / Terminal Protection、Target/business hard precedence、No-hole、reservation、Lane lock、每次 commit 后强制重建 ReadySet、Pickup 后立即释放 Source Lane 及 FINALIZE 语义均保持不变；未修改地图、路径规划或现有硬约束。
+
+新增 4×4 验收场景 A08_cooperation：T_COOP 在 L1 被普通货物 B_COOP 阻挡，目标 203 需要 1 次 Filling；另一普通货物 O_COOP 可作 Filling 源且按曼哈顿距离比 B_COOP 更近。协同开启时唯一 FILLING 选择 B_COOP（102→202），随后 T_COOP 正式搬运（101→203），共 2 次 Move；无 B_COOP 的 SOURCE_CLEARING。对照基线（关闭协同偏好）为 3 次 Move：O_COOP→202 Filling、B_COOP→301 SOURCE_CLEARING、T_COOP→203。当前单 AGV A08 场景实测：协同开启 TotalMoveCount=2、总距离 1300、SystemMakespan=33；关闭协同 TotalMoveCount=3、总距离 2500、SystemMakespan=55。这些数字仅来自该单 AGV 场景，不代表所有地图和多 AGV 场景都能获得同等收益；多 AGV 下并行执行可能缩小 makespan 差异。
+
 ## 6. Manual Cargo and Task Inputs
 配置文件路径统一在 config.m：cargoFile、taskFile。main 不再调用自动任务生成，也不会改写输入 CSV。详见 tasks/INPUT_GUIDE.md。
 

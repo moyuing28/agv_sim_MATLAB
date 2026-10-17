@@ -3,9 +3,9 @@ function [summary,runs] = runAcceptance4x4()
 base=fileparts(mfilename('fullpath')); root=fileparts(fileparts(base));
 addpath(root,base,fullfile(root,'data'),fullfile(root,'tasks'),fullfile(root,'simulator'));
 names=["A01_source_pipeline","A02_target_pipeline","A03_filling","A04_rself", ...
- "A05_terminal_protection","A06_finalize","A07_dual_parallel"];
-vehicles=[3 3 1 1 1 1 4]; runs=cell(7,1); summary=table();
-for k=1:7
+ "A05_terminal_protection","A06_finalize","A07_dual_parallel","A08_cooperation"];
+vehicles=[3 3 1 1 1 1 4 1]; runs=cell(8,1); summary=table();
+for k=1:8
  cfg=acceptanceConfig4x4(); cfg.numAGV=vehicles(k);
  cfg.agvIDs=1:cfg.numAGV; cfg.agvInitialStations=1:cfg.numAGV;
  cfg.cargoFile=fullfile(base,'scenarios',names(k)+"_cargo.csv");
@@ -133,6 +133,14 @@ switch k
    @()assert(any(run.initialReady.ActionSide=="TARGET") && m.TargetStation(1)==301 && m.TargetStation(2)==401 && run.rebuildEvidence.TargetStation(2)==401 && r.ReadySetBuildCount>=height(m)));
   % normalizeReadyActions may deduplicate the two initial L3 destinations.
   run=check(run,'Before commit SOURCE builder selects L3 (conflict is genuine)',@()initialSource(run));
+ case 8
+  run=check(run,'Cooperative FILLING B_COOP 102->202, single preparation move', ...
+   @()assert(r.FillingCount==1 && r.RelocationCount==0 && r.CustomerMoveCount==1 && r.TotalMoveCount==2 && ...
+    isequal(f.CargoID,"B_COOP") && f.SourceStation==102 && f.TargetStation==202 && f.RequiredFillingCountBefore==1));
+  run=check(run,'No B_COOP SOURCE_CLEARING and no second B_COOP move', ...
+   @()assert(~any(m.ActionType=="RELOCATION" & m.CargoID=="B_COOP") && sum(m.CargoID=="B_COOP")==1));
+  run=check(run,'Customer Move T_COOP 101->203 completes Task1', ...
+   @()assert(isequal(m(m.ActionType=="CUSTOMER_MOVE",:).CargoID,"T_COOP") && m(m.ActionType=="CUSTOMER_MOVE",:).SourceStation==101 && m(m.ActionType=="CUSTOMER_MOVE",:).TargetStation==203 && r.taskStatus(1)=="Completed" && r.taskTable.CompletionType(1)=="CUSTOMER_MOVE"));
 end
 end
 function futurePending(run)

@@ -91,6 +91,16 @@ cfg.pickTime=0; cfg.dropTime=0; r=simulateSchedule(1,t,d,cfg); assert(r.isFeasib
 r=simulateSchedule(1,t,d,cfg); assert(~r.isFeasible && r.isDeadlocked && isempty(r.runningMoves));
 assert(contains(r.failureReason,"No feasible filling source lane") && height(r.deadlockDiagnostics.Tasks)==1);
 assert(ismember('ReservedByMoveID',r.deadlockDiagnostics.Slots.Properties.VariableNames));
+% Stage 8.1: cooperative FILLING picks the ordinary Source blocker; two AGVs
+% never re-dispatch the same cargo as a SOURCE_CLEARING relocation.
+[d,t,cfg]=fixture(["M" "B"],["A"],"M",203,2);
+d=place(d,301,"O"); d=setDistance(d,301,202,1); t=refreshPickups(t,d);
+r=simulateSchedule(1,t,d,cfg); assert(r.isFeasible);
+fills=r.moveTable(r.moveTable.ActionType=="FILLING",:);
+assert(r.RelocationCount==0 && r.FillingCount==1 && r.CustomerMoveCount==1 && r.TotalMoveCount==2);
+assert(fills.CargoID=="B" && fills.SourceStation==102 && fills.TargetStation==202);
+assert(sum(r.moveTable.CargoID=="B")==1 && ~any(r.moveTable.ActionType=="RELOCATION" & r.moveTable.CargoID=="B"));
+audit(r,d,cfg);
 % Target waiting path: independent physical Lane mutex, reservation remains owned.
 % Conservative access reservations normally prevent this overlap in end-to-end runs.
 [d,t,cfg]=fixture("M",strings(0,1),"M",201,1);

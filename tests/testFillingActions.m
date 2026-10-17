@@ -98,6 +98,34 @@ future=addTask(s,"BLOCKER",501,"Pending");
 c=getFillingCandidateSourceLanes(t,a,future,d); assert(~any(c.SourcePocketKey=="S"));
 relocation=buildRelocationAction(t,assessCustomerTask(t,d,future),"SOURCE",future,d);
 assert(relocation.IsFeasible && relocation.CargoID=="BLOCKER"); % Rules remain distinct.
+% 38 (Stage 8.1): cooperation prefers the ordinary Source blocker over a nearer candidate.
+[d,s,t]=fixture(); s=place(s,d,102,"BLOCKER");
+% Leave BLOCKER(102)->203 at the default distance 10; O2(302)->203 stays 1.
+a=assessCustomerTask(t,d,s);
+assert(a.SourceAction=="R_SOURCE" && a.SourceActionCargoID=="BLOCKER" && a.TargetAction=="FILLING");
+c=getFillingCandidateSourceLanes(t,a,s,d);
+assert(any(c.CargoID=="BLOCKER" & c.SourceStation==102));
+base=selectFillingSourceLaneBaseline(c);
+assert(base.CargoID=="O2" && base.SourceStation==302); % nearest baseline would pick O2.
+fill=buildFillingAction(t,a,s,d);
+assert(fill.IsFeasible && fill.CargoID=="BLOCKER" && fill.SourceStation==102 && fill.TargetStation==203);
+updated=applyFillingCompletion(fill,s,d); after=assessCustomerTask(t,d,updated);
+assert(after.SourceReady && after.RequiredFillingCount==1 && after.NextFillingStation==204);
+% 39: fallback keeps the nearest baseline when SourceAction is not R_SOURCE.
+[d,s,t]=fixture(); a=assessCustomerTask(t,d,s);
+assert(a.SourceAction=="NONE" && a.TargetAction=="FILLING");
+fill=buildFillingAction(t,a,s,d); assert(fill.CargoID=="O2" && fill.SourceStation==302);
+% 40: a reserved blocker is not forced into cooperation; nearest candidate is used.
+[d,s,t]=fixture(); s=place(s,d,102,"BLOCKER"); s.reservedBy(s.slotMarks==102)=9;
+a=assessCustomerTask(t,d,s);
+fill=buildFillingAction(t,a,s,d);
+assert(fill.IsFeasible && fill.CargoID=="O2" && fill.SourceStation==302);
+% 41: a stale blocker (live location no longer matches occupancy) is not forced either.
+[d,s,t]=fixture(); s=place(s,d,102,"BLOCKER");
+s.cargos.CurrentStation(s.cargos.CargoID=="BLOCKER")=103;
+a=assessCustomerTask(t,d,s);
+fill=buildFillingAction(t,a,s,d);
+assert(fill.IsFeasible && fill.CargoID=="O2" && fill.SourceStation==302);
 % Stale/forged targets and completion-time changes cannot execute old moves.
 [d,s,t]=fixture(); a=assessCustomerTask(t,d,s);
 forged=a; forged.NextFillingStation=204;

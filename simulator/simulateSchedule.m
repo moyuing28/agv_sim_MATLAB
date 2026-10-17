@@ -7,7 +7,7 @@ result=struct('makespan',cfg.invalidCost,'totalDistance',0,'emptyDistance',0,'lo
  'assignedAGVID',zeros(n,1),'finalSequence',[],'prioritySequence',[],'isFeasible',false, ...
  'failureReason',"",'constraints',zeros(0,2),'TotalMoveCount',0,'RelocationCount',0, ...
  'FillingCount',0,'CustomerMoveCount',0,'FinalizeCount',0,'CustomerCompletionMakespan',NaN, ...
- 'SystemMakespan',NaN,'ReadySetBuildCount',0,'WaitCount',0,'isDeadlocked',false);
+ 'SystemMakespan',NaN,'ReadySetBuildCount',0,'WaitCount',0,'isDeadlocked',false,'ExitDistance',0,'ReturnHomeDistance',0);
 result.taskStatus=repmat("Pending",n,1); result.eventLog=runtimeEventRow();
 result.finalizeLog=table(zeros(0,1),zeros(0,1),strings(0,1),zeros(0,1),zeros(0,1),zeros(0,1),strings(0,1), ...
  'VariableNames',{'Time','TaskID','CargoID','TargetStation','BusyAGVCount','ParentPriorityRank','ReadyActionID'});
@@ -58,12 +58,36 @@ while true
    [found,idx]=ismember(unique([sourceAccess;targetAccess]),state.slotMarks);
    assert(all(found),'AGV:SlotState','Unknown Runtime access Slot.');
    if any(state.reservedBy(idx)~=0), continue; end
-   idle=find([agvs.ActiveMoveID]==0);
+   idle=find([agvs.ActiveMoveID]==0 | string({agvs.Status})=="AtEntrance");
+   % A released Slot is not permission to enter a Lane still occupied by
+   % an exiting vehicle. The owner at its Entrance may hand off its own lock.
+   owners=state.laneLocks.MoveID(ismember(state.laneLocks.PocketKey,[action.SourcePocketKey;action.TargetPocketKey]));
+   allowed=false(size(idle));
+   for q=1:numel(idle)
+    allowed(q)=all(owners==0 | owners==agvs(idle(q)).ActiveMoveID);
+   end
+   idle=idle(allowed);
    if isempty(idle), continue; end
    [local,start,empty]=assignAGV(agvs(idle),action,data,cfg,now);
    if local==0, continue; end % Keep scanning lower-priority actions.
    a=idle(local); id=numel(moves)+1;
    move=createRuntimeMove(ready(r,:),id,a,agvs(a),start,empty,data,cfg);
+   % Entrance decision uses this live dispatch, not unfinished-task existence.
+   previous=agvs(a).ActiveMoveID;
+   if previous~=0
+    old=moves(previous);
+    assert(old.Phase=="AtEntrance",'AGV:RuntimeConsistency','Only an entrance AGV may continue a Move.');
+    lock=state.laneLocks.PocketKey==old.TargetPocketKey;
+    assert(state.laneLocks.MoveID(lock)==previous,'AGV:RuntimeConsistency','Entrance lock owner mismatch.');
+    if old.TargetPocketKey==action.SourcePocketKey
+     state.laneLocks.MoveID(lock)=id; % Atomic same-AGV handoff, never unlocked.
+     event="LaneLockHandoff";
+    else
+     state.laneLocks.MoveID(lock)=0; event="TargetReleased";
+    end
+    result.eventLog=[result.eventLog;runtimeEventRow(old,event,old.EntranceStation,state,now)];
+    moves(previous).Phase="Completed"; moves(previous).VehicleFinishTime=now;
+   end
    state.reservedBy(idx)=id;
    if isempty(moves), moves=move; else, moves(end+1)=move; end %#ok<AGROW>
    t=find(tasks.TaskID==action.ParentCustomerTaskID);
@@ -84,6 +108,26 @@ while true
   % Dispatch does not change inventory. Same-time arrivals/handling are drained first.
   if any([moves.NextEventTime]<=now), break; end
  end
+ if ~isempty(moves) && any([moves.NextEventTime]<=now), continue; end
+ % No action was dispatchable to these entrance AGVs after the live scan.
+ % Return is non-preemptible; other vehicles continue on the normal event loop.
+ departed=false;
+ for a=find(string({agvs.Status})=="AtEntrance")
+  id=agvs(a).ActiveMoveID; m=moves(id);
+  distance=getTravelDistance(m.EntranceStation,m.HomeStation,data);
+  assert(isfinite(distance) && distance>=0,'AGV:HomeRoute','Entrance-to-Home route is unreachable for AGV %g.',agvs(a).ID);
+  lock=state.laneLocks.PocketKey==m.TargetPocketKey;
+  assert(state.laneLocks.MoveID(lock)==id,'AGV:RuntimeConsistency','Entrance lock owner mismatch.');
+  state.laneLocks.MoveID(lock)=0;
+  result.eventLog=[result.eventLog;runtimeEventRow(m,"TargetReleased",m.EntranceStation,state,now)];
+  m.ReturnHomeDistance=distance; m.ReturnHomeStartTime=now;
+  m.Phase="ReturningHome"; m.NextEventTime=now+getTravelTime(distance,cfg); moves(id)=m;
+  agvs(a).Status="ReturningHome"; agvs(a).AvailableTime=m.NextEventTime;
+  agvs(a).TotalTravelDistance=agvs(a).TotalTravelDistance+distance;
+  result.eventLog=[result.eventLog;runtimeEventRow(m,"ReturnHomeStart",m.EntranceStation,state,now)];
+  departed=true;
+ end
+ if departed, continue; end % Released lanes can dispatch other AGVs at this timestamp.
  if ~isempty(moves) && any([moves.NextEventTime]<=now), continue; end
  if all(state.taskStatus=="Completed") && all(string({moves.Phase})=="Completed"), break; end
  future=[reshape([moves.NextEventTime],[],1);tasks.ReleaseTime(state.taskStatus=="Pending" & tasks.ReleaseTime>now)];
@@ -122,7 +166,9 @@ result.TotalMoveCount=sum(isfinite([moves.CompletionTime]));
 result.RelocationCount=sum(string({moves.ActionType})=="RELOCATION" & isfinite([moves.CompletionTime]));
 result.FillingCount=sum(string({moves.ActionType})=="FILLING" & isfinite([moves.CompletionTime]));
 result.CustomerMoveCount=sum(string({moves.ActionType})=="CUSTOMER_MOVE" & isfinite([moves.CompletionTime]));
-result.emptyDistance=sum([moves.EmptyDistance]); result.loadedDistance=sum([moves.LoadedDistance]);
+result.ExitDistance=sum([moves.ExitDistance]); result.ReturnHomeDistance=sum([moves.ReturnHomeDistance]);
+result.emptyDistance=sum([moves.EmptyDistance])+result.ExitDistance+result.ReturnHomeDistance;
+result.loadedDistance=sum([moves.LoadedDistance]);
 result.totalDistance=result.emptyDistance+result.loadedDistance;
 result.totalPickDropTime=result.TotalMoveCount*(cfg.pickTime+cfg.dropTime); result.agvs=agvs;
 result.finalCargoState=state.cargos; result.finalState=state;

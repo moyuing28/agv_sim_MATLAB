@@ -1,6 +1,6 @@
 function [state,agvs,moves,log] = processRuntimeEvents(state,agvs,moves,now,data,cfg)
-%PROCESSRUNTIMEEVENTS Drain the timestamp before dispatch; zero exit duration.
-% Locks cover handling only. Waiting AGVs hold no physical Lane lock.
+%PROCESSRUNTIMEEVENTS One event engine for handling, target exit and home return.
+% Source still releases at Pickup; Target lock covers handling AND real exit.
 log=runtimeEventRow();
 while true
  due=find([moves.NextEventTime]<=now);
@@ -25,7 +25,7 @@ while true
     m.SourceArrivalTime=now; log=[log;runtimeEventRow(m,"SourceArrival",m.SourceStation,state,now)]; %#ok<AGROW>
    end
    lock=find(state.laneLocks.PocketKey==m.SourcePocketKey);
-   if state.laneLocks.MoveID(lock)~=0
+   if state.laneLocks.MoveID(lock)~=0 && state.laneLocks.MoveID(lock)~=m.MoveID
     m.Phase="WaitingSource"; m.WaitSince=now; m.NextEventTime=Inf;
     agvs(a).Status="WaitingSource"; log=[log;runtimeEventRow(m,"WaitSource",m.SourceStation,state,now)]; %#ok<AGROW>
    else
@@ -87,12 +87,27 @@ while true
    end
    m.DropoffTime=now; m.CompletionTime=now;
    log=[log;runtimeEventRow(m,"Dropoff",m.TargetStation,state,now)]; %#ok<AGROW>
-   state.reservedBy(access)=0; state.laneLocks.MoveID(state.laneLocks.PocketKey==m.TargetPocketKey)=0;
-   m.Phase="Completed"; m.NextEventTime=Inf;
-   agvs(a).CargoID=""; agvs(a).ActiveMoveID=0; agvs(a).ActiveTask=0;
-   agvs(a).Status="Idle"; agvs(a).CurrentStation=m.TargetStation; agvs(a).AvailableTime=now;
+   state.reservedBy(access)=0; % Cargo placement ends reservation, not physical occupancy.
+   m.Phase="ExitingLane"; m.NextEventTime=now+getTravelTime(m.ExitDistance,cfg);
+   agvs(a).CargoID=""; agvs(a).ActiveTask=0;
+   agvs(a).Status="ExitingLane"; agvs(a).CurrentStation=m.TargetStation; agvs(a).AvailableTime=m.NextEventTime;
    agvs(a).TotalBusyTime=agvs(a).TotalBusyTime+now-m.DispatchTime;
-   log=[log;runtimeEventRow(m,"TargetReleased",m.TargetStation,state,now)]; %#ok<AGROW>
+   agvs(a).TotalTravelDistance=agvs(a).TotalTravelDistance+m.ExitDistance;
+   log=[log;runtimeEventRow(m,"TargetReservationReleased",m.TargetStation,state,now); ...
+    runtimeEventRow(m,"ExitStart",m.TargetStation,state,now)]; %#ok<AGROW>
+  case "ExitingLane"
+   assert(state.laneLocks.MoveID(state.laneLocks.PocketKey==m.TargetPocketKey)==m.MoveID, ...
+    'AGV:RuntimeConsistency','Target lock lost during exit.');
+   m.ExitArrivalTime=now; m.Phase="AtEntrance"; m.NextEventTime=Inf;
+   agvs(a).CurrentStation=m.EntranceStation; agvs(a).AvailableTime=now; agvs(a).Status="AtEntrance";
+   agvs(a).TotalBusyTime=agvs(a).TotalBusyTime+now-m.DropoffTime;
+   log=[log;runtimeEventRow(m,"ExitArrival",m.EntranceStation,state,now)]; %#ok<AGROW>
+  case "ReturningHome"
+   m.HomeArrivalTime=now; m.VehicleFinishTime=now; m.Phase="Completed"; m.NextEventTime=Inf;
+   agvs(a).CurrentStation=m.HomeStation; agvs(a).AvailableTime=now;
+   agvs(a).Status="Idle"; agvs(a).ActiveMoveID=0; agvs(a).ActiveTask=0;
+   agvs(a).TotalBusyTime=agvs(a).TotalBusyTime+now-m.ReturnHomeStartTime;
+   log=[log;runtimeEventRow(m,"HomeArrival",m.HomeStation,state,now)]; %#ok<AGROW>
   otherwise
    error('AGV:RuntimeEventState','Unexpected event phase %s.',m.Phase);
  end

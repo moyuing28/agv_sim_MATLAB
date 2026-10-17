@@ -180,7 +180,7 @@ for k=1:height(r.eventLog)
    if m.ActionType=="CUSTOMER_MOVE", s.taskStatus(t.TaskID==m.ParentCustomerTaskID)="InProgress"; end
   case {"SourceLock","TargetLock"}
    key=m.SourcePocketKey; if e.Event=="TargetLock", key=m.TargetPocketKey; end
-   q=keys==key; assert(locks(q)==0); locks(q)=m.MoveID;
+   q=keys==key; assert(locks(q)==0 || locks(q)==m.MoveID); locks(q)=m.MoveID;
   case "Pickup"
    assert(onboard(a)=="" && s.occupancy(s.slotMarks==e.StationMark)==e.CargoID);
    assert(~any(t.CargoID==e.CargoID & s.taskStatus=="Completed"));
@@ -196,8 +196,11 @@ for k=1:height(r.eventLog)
    s.occupancy(s.slotMarks==e.StationMark)=e.CargoID; onboard(a)="";
    q=s.cargos.CargoID==e.CargoID; s.cargos.Status(q)="AtSlot"; s.cargos.CurrentStation(q)=e.StationMark; s.cargos.AGVID(q)=0;
    if m.ActionType=="CUSTOMER_MOVE", s.taskStatus(t.TaskID==m.ParentCustomerTaskID)="Completed"; end
-  case "TargetReleased"
+  case "TargetReservationReleased"
    [~,idx]=ismember(m.TargetAccess,s.slotMarks); assert(all(s.reservedBy(idx)==m.MoveID)); s.reservedBy(idx)=0;
+  case "LaneLockHandoff"
+   q=keys==m.TargetPocketKey; assert(locks(q)==m.MoveID); locks(q)=e.LaneOwner; busy(a)=0;
+  case "TargetReleased"
    q=keys==m.TargetPocketKey; assert(locks(q)==m.MoveID); locks(q)=0; busy(a)=0;
  end
  validateNoHoleState(table(s.slotMarks,s.occupancy,'VariableNames',{'StationMark','CargoID'}),d.lanes);

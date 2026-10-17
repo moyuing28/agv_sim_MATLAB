@@ -35,7 +35,9 @@ try
   assert(fid>=0,'AGV:OutputFile','Cannot write result status.');
   fprintf(fid,'Feasible=%d\nMakespan=%.6f\n%s\n',r.isFeasible,r.makespan,r.failureReason);
   fprintf(fid,'SystemMakespan=%.6f\nCustomerCompletionMakespan=%.6f\nFinalizeCount=%d\n', ...
-   r.SystemMakespan,r.CustomerCompletionMakespan,r.FinalizeCount); fclose(fid);
+   r.SystemMakespan,r.CustomerCompletionMakespan,r.FinalizeCount);
+  fprintf(fid,'MoveCount=%d\nTotalDistance=%.6f\nExitDistance=%.6f\nReturnHomeDistance=%.6f\nDistanceUnit=MapUnit\n', ...
+   r.TotalMoveCount,r.totalDistance,r.ExitDistance,r.ReturnHomeDistance); fclose(fid);
   if cfg.enableAnimation && isfield(r,'taskTable')
    exportScheduleAnimation(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.html']));
   end

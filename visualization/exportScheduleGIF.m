@@ -14,6 +14,7 @@ times=linspace(0,p.duration,frameCount);
 if p.duration>0
  assigned=[p.tasks.vehicle]~=0;
  events=unique([p.tasks(assigned).start p.tasks(assigned).arrivePickup p.tasks(assigned).pickupFinish p.tasks(assigned).arriveDropoff p.tasks(assigned).finish]);
+ if isfield(p,'vehicleLegs'), events=unique([events p.vehicleLegs.start p.vehicleLegs.finish]); end
  for e=events
   [~,idx]=min(abs(times-e));
   if idx>1 && idx<frameCount, times(idx)=e; end

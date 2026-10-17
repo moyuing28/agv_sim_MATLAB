@@ -2,7 +2,7 @@ function testRuntimeExecution()
 % Stage 7B integration: full event replay, real dispatch/reservation lifetimes.
 [d,t,cfg]=fixture("M",strings(0,1),"M",201,1);
 r=simulateSchedule(1,t,d,cfg); assert(r.isFeasible && r.CustomerMoveCount==1 && r.TotalMoveCount==1);
-assert(r.makespan==r.taskFinishTime && r.assignedAGVID==10); audit(r,d,cfg);
+assert(r.CustomerCompletionMakespan==r.taskFinishTime && r.SystemMakespan==r.taskFinishTime+5 && r.assignedAGVID==10); audit(r,d,cfg);
 p=r.eventLog(r.eventLog.Event=="Pickup",:); released=r.eventLog(r.eventLog.Event=="SourceReleased",:);
 assert(p.CargoStatus=="OnAGV" && p.SourceReserved && p.TargetReserved && p.LaneOwner==1);
 assert(~released.SourceReserved && released.TargetReserved && released.LaneOwner==0);
@@ -75,8 +75,10 @@ assert(all(dependent.DispatchTime>=r.taskFinishTime(1))); audit(r,d,cfg);
 d=place(d,601,"N"); t=refreshPickups(t,d); d=setDistance(d,0,101,40); d=setDistance(d,0,601,1);
 r=simulateSchedule([1 2],t,d,cfg); assert(r.isFeasible && r.moves(1).ParentCustomerTaskID==t.TaskID(1));
 % Unreachable high-priority action: scan lower priority instead of idling.
+% After that action, Entrance/Home=0 still cannot reach 101. The old success
+% expectation relied on parking at the lower action's interior target 501.
 d=setDistance(d,0,101,NaN); r=simulateSchedule([1 2],t,d,cfg);
-assert(r.isFeasible && r.moves(1).ParentCustomerTaskID==t.TaskID(2)); audit(r,d,cfg);
+assert(~r.isFeasible && r.isDeadlocked && r.moves(1).ParentCustomerTaskID==t.TaskID(2) && r.taskStatus(2)=="Completed" && r.taskStatus(1)=="Pending"); audit(r,d,cfg);
 % Assignment computes earliest finish; tie by actual ID, not configuration order.
 [d,t,cfg]=fixture("M",strings(0,1),"M",201,2); cfg.agvInitialStations=[0 601];
 d=setDistance(d,0,101,10); d=setDistance(d,601,101,1);
@@ -106,7 +108,7 @@ audit(r,d,cfg);
 [d,t,cfg]=fixture("M",strings(0,1),"M",201,1);
 s=initializeCargoState(d); s.customerTasks=t; s.taskStatus="InProgress";
 keys=unique(d.lanes.PocketKey); s.laneLocks=table(keys,zeros(numel(keys),1),'VariableNames',{'PocketKey','MoveID'});
-agv=struct('ID',10,'CurrentStation',101,'AvailableTime',0,'TotalBusyTime',0,'CargoID',"M", ...
+agv=struct('ID',10,'CurrentStation',101,'AvailableTime',0,'TotalBusyTime',0,'TotalTravelDistance',0,'CargoID',"M", ...
  'ActiveMoveID',1,'ActiveTask',1,'Status',"ToTarget");
 a=buildCustomerMoveAction(t,assessCustomerTask(t,d,s),s,d); % status InProgress does not change cargo readiness.
 row=table("snapshot",{a},'VariableNames',{'ReadyActionID','ActionPayload'});
@@ -121,7 +123,10 @@ assert(~any(s.laneLocks.MoveID==1) && ~any(s.reservedBy(s.slotMarks<200)==1));
 s.laneLocks.MoveID(s.laneLocks.PocketKey=="T")=0; % The other Lane operation exits.
 [s,agv,m,~]=processRuntimeEvents(s,agv,m,5,d,cfg);
 [s,agv,m,~]=processRuntimeEvents(s,agv,m,6,d,cfg);
-assert(m.Phase=="Completed" && m.TargetStation==201 && agv.Status=="Idle" && s.taskStatus=="Completed");
+assert(m.Phase=="ExitingLane" && m.TargetStation==201 && agv.Status=="ExitingLane" && s.taskStatus=="Completed");
+assert(all(s.reservedBy==0) && s.laneLocks.MoveID(s.laneLocks.PocketKey=="T")==1);
+[s,agv,m,~]=processRuntimeEvents(s,agv,m,11,d,cfg);
+assert(m.Phase=="AtEntrance" && agv.CurrentStation==0 && s.laneLocks.MoveID(s.laneLocks.PocketKey=="T")==1);
 fprintf('All multi-AGV Runtime execution tests passed.\n');
 end
 function rows=simulateAgain(order,t,d,cfg)
@@ -135,6 +140,9 @@ d.lanes=table(pockets(2:end),pockets(2:end),repmat((0:5)',6,1),marks(2:end),repm
  'VariableNames',{'PocketKey','PocketName','Sequence','StationMark','StationType'});
 ids=strings(36,1); ids(1:numel(source))=source(:); ids(7:6+numel(target))=target(:);
 d.cargoInitial=table(marks(2:end),ids,pockets(2:end),d.lanes.Sequence,'VariableNames',{'StationMark','CargoID','PocketName','Sequence'});
+% Existing synthetic navigation mark 0 is the shared outside entrance.
+% Inventory and directed distances are unchanged.
+d.lanes=[d.lanes;table(keys',keys',repmat(6,6,1),zeros(6,1),repmat("Entrance",6,1),'VariableNames',d.lanes.Properties.VariableNames)];
 d.stationToIndex=containers.Map(num2cell(marks),num2cell((1:37)'));
 d.distanceMatrix=5*ones(37); d.distanceMatrix(1,:)=1; d.distanceMatrix(1:38:end)=0;
 cfg=config(); cfg.numAGV=vehicles; cfg.agvIDs=10;
@@ -157,12 +165,15 @@ function d=setDistance(d,source,target,value)
 d.distanceMatrix(d.stationToIndex(source),d.stationToIndex(target))=value;
 end
 function audit(r,d,cfg)
-assert(r.isFeasible && r.makespan==r.SystemMakespan && r.CustomerCompletionMakespan==max(r.taskFinishTime) && r.SystemMakespan>=r.CustomerCompletionMakespan);
+assert(r.isFeasible || r.isDeadlocked);
+if r.isFeasible
+ assert(r.makespan==r.SystemMakespan && r.CustomerCompletionMakespan==max(r.taskFinishTime) && r.SystemMakespan>=r.CustomerCompletionMakespan);
+end
 assert(numel(unique(r.moveTable.MoveID))==height(r.moveTable));
 assert(r.TotalMoveCount==height(r.moveTable) && r.RelocationCount==sum(r.moveTable.ActionType=="RELOCATION"));
 assert(r.TotalMoveCount==r.CustomerMoveCount+r.RelocationCount+r.FillingCount);
 assert(all(r.finalState.reservedBy==0) && all(r.finalState.laneLocks.MoveID==0));
-assert(all(r.finalCargoState.Status=="AtSlot") && r.CustomerMoveCount+r.FinalizeCount==height(r.taskTable));
+assert(all(r.finalCargoState.Status=="AtSlot") && r.CustomerMoveCount+r.FinalizeCount==sum(r.taskStatus=="Completed"));
 state=initializeCargoState(d); onboard=strings(cfg.numAGV,1); busy=zeros(cfg.numAGV,1); reserved=zeros(numel(state.slotMarks),1);
 locks=zeros(height(r.finalState.laneLocks),1); keys=r.finalState.laneLocks.PocketKey;
 for k=1:height(r.eventLog)
@@ -173,7 +184,7 @@ for k=1:height(r.eventLog)
   assert(all(reserved(idx)==0)); reserved(idx)=m.MoveID;
  elseif e.Event=="SourceLock" || e.Event=="TargetLock"
   key=m.SourcePocketKey; if e.Event=="TargetLock", key=m.TargetPocketKey; end
-  q=find(keys==key); assert(locks(q)==0); locks(q)=m.MoveID;
+  q=find(keys==key); assert(locks(q)==0 || locks(q)==m.MoveID); locks(q)=m.MoveID;
  elseif e.Event=="Pickup"
   assert(onboard(a)=="" && state.occupancy(state.slotMarks==e.StationMark)==e.CargoID);
   state.occupancy(state.slotMarks==e.StationMark)=""; onboard(a)=e.CargoID;
@@ -184,11 +195,26 @@ for k=1:height(r.eventLog)
  elseif e.Event=="Dropoff"
   [drop,~,ok]=getLegalDropSlot(m.TargetPocketKey,state,d); assert(ok && drop==m.TargetStation);
   assert(onboard(a)==e.CargoID); state.occupancy(state.slotMarks==e.StationMark)=e.CargoID; onboard(a)="";
- elseif e.Event=="TargetReleased"
+ elseif e.Event=="TargetReservationReleased"
   [~,idx]=ismember(m.TargetAccess,state.slotMarks); assert(all(reserved(idx)==m.MoveID)); reserved(idx)=0;
+ elseif e.Event=="LaneLockHandoff"
+  q=find(keys==m.TargetPocketKey); assert(locks(q)==m.MoveID); locks(q)=e.LaneOwner; busy(a)=0;
+ elseif e.Event=="TargetReleased"
   q=find(keys==m.TargetPocketKey); assert(locks(q)==m.MoveID); locks(q)=0; busy(a)=0;
  end
  validateNoHoleState(table(state.slotMarks,state.occupancy,'VariableNames',{'StationMark','CargoID'}),d.lanes);
 end
 assert(all(busy==0) && all(onboard=="") && isequal(state.occupancy,r.finalSlotState.CargoID));
+assert(abs(r.totalDistance-sum([r.agvs.TotalTravelDistance]))<1e-9);
+assert(r.emptyDistance==sum([r.moves.EmptyDistance])+r.ExitDistance+r.ReturnHomeDistance);
+for m=r.moves
+ assert(m.ExitArrivalTime==m.DropoffTime+getTravelTime(m.ExitDistance,cfg));
+ assert(m.VehicleFinishTime>=m.ExitArrivalTime);
+ if isfinite(m.ReturnHomeStartTime)
+  assert(m.HomeArrivalTime==m.ReturnHomeStartTime+getTravelTime(m.ReturnHomeDistance,cfg));
+  following=r.moveTable(r.moveTable.AGVID==m.AGVID & r.moveTable.MoveID>m.MoveID,:);
+  assert(all(following.DispatchTime>=m.HomeArrivalTime));
+ end
+end
+assert(all([r.agvs.CurrentStation]==cfg.agvInitialStations) && all(string({r.agvs.Status})=="Idle"));
 end

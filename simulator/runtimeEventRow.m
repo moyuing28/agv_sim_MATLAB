@@ -9,7 +9,9 @@ end
 [~,s]=ismember(move.SourceAccess,state.slotMarks); [~,t]=ismember(move.TargetAccess,state.slotMarks);
 sourceReserved=~move.SourceReleased && all(state.reservedBy(s)==move.MoveID); targetReserved=all(state.reservedBy(t)==move.MoveID);
 lane=state.laneLocks.MoveID(state.laneLocks.PocketKey==move.SourcePocketKey);
-if station==move.TargetStation, lane=state.laneLocks.MoveID(state.laneLocks.PocketKey==move.TargetPocketKey); end
+if station==move.TargetStation || ismember(string(event),["ExitArrival","TargetReleased","LaneLockHandoff","ReturnHomeStart","HomeArrival"])
+ lane=state.laneLocks.MoveID(state.laneLocks.PocketKey==move.TargetPocketKey);
+end
 row=table(now,string(event),move.ParentCustomerTaskID,move.CargoID,move.AGVID,station,move.MoveID,move.ActionType, ...
  sourceReserved,targetReserved,lane,state.cargos.Status(state.cargos.CargoID==move.CargoID), ...
  state.taskStatus(state.customerTasks.TaskID==move.ParentCustomerTaskID),'VariableNames',names);

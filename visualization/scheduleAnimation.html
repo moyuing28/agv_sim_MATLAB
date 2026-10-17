@@ -32,35 +32,46 @@
 'use strict';
 const D=JSON.parse(document.getElementById('schedule-data').textContent);
 const asArray=x=>x==null?[]:Array.isArray(x)?x:[x];
-for(const k of ['stations','vehicles','cargo','tasks'])D[k]=asArray(D[k]);
+for(const k of ['stations','vehicles','cargo','tasks','vehicleLegs'])D[k]=asArray(D[k]);
 const $=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
 const colors=['#336be4','#159b83','#9859d1','#dc6570','#bb7b21','#457e8d'];
 const color=id=>colors[Math.max(0,D.vehicles.findIndex(v=>v.id===id))%colors.length];
 const fmt=x=>typeof x==='number'?x.toFixed(2):'—';
 const scheduled=D.tasks.filter(t=>t.vehicle!==0).sort((a,b)=>a.start-b.start||(a.dispatchOrder||0)-(b.dispatchOrder||0));
 const customerCompletionTimes=Array.isArray(D.customerCompletionTimes)?D.customerCompletionTimes:(typeof D.customerCompletionTimes==='number'?[D.customerCompletionTimes]:[]);
-const events=[...new Set([0,D.duration,...customerCompletionTimes,...scheduled.flatMap(t=>[t.start,t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.finish])])].sort((a,b)=>a-b);
+const events=[...new Set([0,D.duration,...customerCompletionTimes,...D.vehicleLegs.flatMap(l=>[l.start,l.finish]),...scheduled.flatMap(t=>[t.start,t.arrivePickup,t.pickupStart??t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.dropoffStart??t.arriveDropoff,t.finish])])].sort((a,b)=>a-b);
 const vehicleTasks=new Map(D.vehicles.map(v=>[v.id,scheduled.filter(t=>t.vehicle===v.id)]));
 function svg(parent,tag,attrs={},label){const e=document.createElementNS(NS,tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);if(label!==undefined)e.textContent=label;parent.appendChild(e);return e;}
 function phase(t,time){
  if(!t.vehicle)return time<t.release?'未下发':'未派单';
  if(time<t.start)return time<t.release?'未下发':'等待派单';
  if(time<t.arrivePickup)return '空载行驶';
+ if(time<(t.pickupStart??t.arrivePickup))return '等待源巷道';
  if(time<t.pickupFinish)return '装货';
  if(time<t.arriveDropoff)return '载货行驶';
+ if(time<(t.dropoffStart??t.arriveDropoff))return '等待目标巷道';
  if(time<t.finish)return '卸货';
  return '已完成';
 }
 function snapshot(time){
  const vehicles=D.vehicles.map(v=>{
-  let station=v.station,active=null;
-  for(const t of vehicleTasks.get(v.id)){if(time>=t.finish){station=t.dropoff;continue;}if(time>=t.start)active=t;break;}
+  let station=v.station,active=null,latest=-Infinity,latestID=0;
+  for(const t of vehicleTasks.get(v.id)){if(time>=t.finish){station=t.dropoff;latest=t.finish;latestID=t.id;continue;}if(time>=t.start){active=t;latest=t.start;latestID=t.id;}break;}
   let from=station,to=station,ratio=0,status='等待',cargo=null,progress=0;
   if(active){const t=active;status=phase(t,time);
    if(time<t.arrivePickup){from=t.from;to=t.pickup;ratio=(time-t.start)/(t.arrivePickup-t.start);}
-   else if(time<t.pickupFinish){from=to=t.pickup;progress=(time-t.arrivePickup)/(t.pickupFinish-t.arrivePickup);}
+   else if(time<(t.pickupStart??t.arrivePickup)){from=to=t.pickup;}
+   else if(time<t.pickupFinish){from=to=t.pickup;progress=(time-(t.pickupStart??t.arrivePickup))/(t.pickupFinish-(t.pickupStart??t.arrivePickup));}
    else if(time<t.arriveDropoff){from=t.pickup;to=t.dropoff;ratio=(time-t.pickupFinish)/(t.arriveDropoff-t.pickupFinish);cargo=t.cargo;}
-   else{from=to=t.dropoff;cargo=t.cargo;progress=(time-t.arriveDropoff)/(t.finish-t.arriveDropoff);}
+   else if(time<(t.dropoffStart??t.arriveDropoff)){from=to=t.dropoff;cargo=t.cargo;}
+   else{from=to=t.dropoff;cargo=t.cargo;progress=(time-(t.dropoffStart??t.arriveDropoff))/(t.finish-(t.dropoffStart??t.arriveDropoff));}
+  }
+  for(const leg of D.vehicleLegs){
+   if(leg.vehicle!==v.id||time<leg.start||leg.start<latest||(leg.start===latest&&leg.moveID<latestID))continue;
+   cargo=null;active=null;progress=0;
+   if(time<leg.finish){from=leg.from;to=leg.to;ratio=(time-leg.start)/(leg.finish-leg.start);status=leg.status;}
+   else{from=to=leg.to;ratio=0;status='等待';}
+   latest=leg.start;
   }
   return {...v,from,to,ratio,status,cargo,progress,task:active};
  });
@@ -149,6 +160,7 @@ function route(from,to,t,empty){const a=positions.get(from),b=positions.get(to);
  const el=svg(routeLayer,'line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,stroke:t.vehicle?color(t.vehicle):'#9da9ba','stroke-width':1.5,'stroke-dasharray':empty||!t.vehicle?'5 6':'','marker-end':'url(#arrow)',opacity:.17});
  svg(el,'title',{},`T${t.id}: ${from} → ${to}${empty?'（空载）':''}`);routes.push({el,t,empty});}
 for(const t of D.tasks){if(t.vehicle)route(t.from,t.pickup,t,true);route(t.pickup,t.dropoff,t,false);}
+for(const leg of D.vehicleLegs)route(leg.from,leg.to,{vehicle:leg.vehicle,id:leg.moveID,start:leg.start,arrivePickup:leg.finish},true);
 for(const s of D.stations){const p=positions.get(s.id),g=svg(stationLayer,'g');svg(g,'circle',{cx:p.x,cy:p.y,r:15,fill:'#fff',stroke:'#b2bfd1','stroke-width':2});svg(g,'text',{x:p.x,y:p.y+4,'text-anchor':'middle','font-size':11,fill:'#344560'},s.id);svg(g,'title',{},`站点 ${s.id} · ${s.pocket}`);}
 const cargoNodes=D.cargo.map(c=>{const g=svg(cargoLayer,'g');svg(g,'rect',{x:20,y:-12,width:16,height:16,rx:3,fill:'#f3b64f',stroke:'#c28a27'});svg(g,'text',{x:40,y:1,'font-size':10,fill:'#856023'},c.id);return g;});
 const vehicleNodes=D.vehicles.map(v=>{const g=svg(vehicleLayer,'g');svg(g,'rect',{x:-16,y:-10,width:32,height:20,rx:6,fill:color(v.id),stroke:'white','stroke-width':2});for(const x of [-10,10])for(const y of [-12,10])svg(g,'rect',{x:x-3,y,width:6,height:3,rx:1,fill:'#273851'});svg(g,'text',{x:0,y:4,'font-size':9,fill:'white','text-anchor':'middle'},String(v.id).padStart(2,'0'));svg(g,'text',{x:0,y:27,'font-size':10,fill:color(v.id),'text-anchor':'middle'},`AGV${String(v.id).padStart(2,'0')}`);const load=svg(g,'g');svg(load,'rect',{x:-8,y:-30,width:16,height:15,rx:3,fill:'#f3b64f',stroke:'#c28a27'});const text=svg(load,'text',{x:12,y:-18,'font-size':10,fill:'#856023'});return {g,load,text};});
@@ -159,9 +171,14 @@ $('timeline').setAttribute('viewBox',`0 0 ${tw} ${th}`);
 for(let i=0;i<=10;i++){const t=D.duration*i/10,x=scale(t);svg($('timeline'),'line',{x1:x,x2:x,y1:25,y2:th-20,stroke:'#e4eaf3'});svg($('timeline'),'text',{x,y:15,'text-anchor':'middle','font-size':10,fill:'#74839a'},fmt(t));}
 D.vehicles.forEach((v,i)=>{const y=40+i*46;svg($('timeline'),'text',{x:0,y:y+12,'font-size':12,fill:color(v.id)},`AGV${String(v.id).padStart(2,'0')}`);
  for(const t of vehicleTasks.get(v.id)){
-  const edges=[t.start,t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.finish],fills=['#afbdd0','#f3b64f',color(v.id),'#f3b64f'];
-  for(let j=0;j<4;j++)if(edges[j+1]>edges[j]){const r=svg($('timeline'),'rect',{x:scale(edges[j]),y,width:scale(edges[j+1])-scale(edges[j]),height:22,fill:fills[j],rx:2});svg(r,'title',{},`T${t.id} · ${['空载','装货','载货','卸货'][j]} · ${fmt(edges[j])}–${fmt(edges[j+1])}s`);}
+  const edges=[t.start,t.arrivePickup,t.pickupStart??t.arrivePickup,t.pickupFinish,t.arriveDropoff,t.dropoffStart??t.arriveDropoff,t.finish],fills=['#afbdd0','#d6dae1','#f3b64f',color(v.id),'#d6dae1','#f3b64f'];
+  for(let j=0;j<6;j++)if(edges[j+1]>edges[j]){const r=svg($('timeline'),'rect',{x:scale(edges[j]),y,width:scale(edges[j+1])-scale(edges[j]),height:22,fill:fills[j],rx:2});svg(r,'title',{},`T${t.id} · ${['空载','等待源锁','装货','载货','等待目标锁','卸货'][j]} · ${fmt(edges[j])}–${fmt(edges[j+1])}s`);}
   svg($('timeline'),'text',{x:scale(t.start)+3,y:y+34,'font-size':10,fill:'#53657d'},`T${t.id} · ${t.cargo}`);
+ }
+ for(const leg of D.vehicleLegs.filter(l=>l.vehicle===v.id)){
+  if(leg.finish<=leg.start)continue;
+  const r=svg($('timeline'),'rect',{x:scale(leg.start),y,width:scale(leg.finish)-scale(leg.start),height:22,fill:'#afbdd0',rx:2});
+  svg(r,'title',{},`${leg.status} · ${leg.from} → ${leg.to} · ${fmt(leg.start)}–${fmt(leg.finish)}s`);
  }
 });
 if(!scheduled.length)svg($('timeline'),'text',{x:250,y:50,fill:'#74839a','font-size':13},'没有已派单任务，可检查任务明细与受阻原因。');
@@ -169,7 +186,7 @@ const cursor=svg($('timeline'),'line',{x1:left,x2:left,y1:22,y2:th-15,stroke:'#e
 let time=0,playing=false,last=0;
 function render(){const s=snapshot(time);$('clock').textContent=`${fmt(time)} / ${fmt(D.duration)} s`;$('seek').value=time;$('summary').textContent=`Customer ${s.customerCompleted} / ${D.customerTaskCount??D.tasks.length} · Move ${s.completed} / ${D.tasks.length}`;
  s.cargo.forEach((c,i)=>{const p=positions.get(c.station);cargoNodes[i].style.display=c.onboard?'none':'';cargoNodes[i].setAttribute('transform',`translate(${p.x},${p.y})`);});
- s.vehicles.forEach((v,i)=>{const a=positions.get(v.from),b=positions.get(v.to),x=a.x+(b.x-a.x)*v.ratio,y=a.y+(b.y-a.y)*v.ratio;const peers=s.vehicles.filter(o=>o.from===v.from&&o.to===v.to&&o.ratio===v.ratio),offset=peers.findIndex(o=>o.id===v.id)*38;vehicleNodes[i].g.setAttribute('transform',`translate(${x-18-offset},${y-25})`);vehicleNodes[i].load.style.display=v.cargo?'':'none';vehicleNodes[i].text.textContent=v.cargo||'';cards[i].status.textContent=v.status+(v.task?` · T${v.task.id}`:'');cards[i].detail.textContent=v.task?`${v.from} → ${v.to} · ${v.cargo||'空载'}`:`停在站点 ${v.from}`;cards[i].progress.hidden=!['装货','卸货'].includes(v.status);cards[i].bar.style.width=`${v.progress*100}%`;});
+ s.vehicles.forEach((v,i)=>{const a=positions.get(v.from),b=positions.get(v.to),x=a.x+(b.x-a.x)*v.ratio,y=a.y+(b.y-a.y)*v.ratio;const peers=s.vehicles.filter(o=>o.from===v.from&&o.to===v.to&&o.ratio===v.ratio),offset=peers.findIndex(o=>o.id===v.id)*38;vehicleNodes[i].g.setAttribute('transform',`translate(${x-18-offset},${y-25})`);vehicleNodes[i].load.style.display=v.cargo?'':'none';vehicleNodes[i].text.textContent=v.cargo||'';cards[i].status.textContent=v.status+(v.task?` · T${v.task.id}`:'');cards[i].detail.textContent=(v.task||v.from!==v.to)?`${v.from} → ${v.to} · ${v.cargo||'空载'}`:`停在站点 ${v.from}`;cards[i].progress.hidden=!['装货','卸货'].includes(v.status);cards[i].bar.style.width=`${v.progress*100}%`;});
  routes.forEach(({el,t,empty})=>{const active=t.vehicle&&(empty?time>=t.start&&time<t.arrivePickup:time>=t.pickupFinish&&time<t.arriveDropoff);el.setAttribute('opacity',active?.9:.14);el.setAttribute('stroke-width',active?3:1.5);});
  rowNodes.forEach((node,i)=>{node.textContent=phase(D.tasks[i],time);node.style.color=node.textContent==='已完成'?'#167148':'#53657d';});cursor.setAttribute('x1',scale(time));cursor.setAttribute('x2',scale(time));$('step').disabled=!events.some(e=>e>time);}
 function pause(){playing=false;$('play').textContent='▶ 播放';}

@@ -4,7 +4,7 @@ function testRuntimeFinalization()
 r=simulateSchedule(1,t,d,cfg);
 assert(r.isFeasible && r.FinalizeCount==1 && r.TotalMoveCount==0 && r.CustomerMoveCount==0 && r.makespan==0);
 assert(isempty(r.moveTable) && isempty(r.eventLog) && r.assignedAGV==0); resourcesReleased(r);
-% Source pipeline with THREE AGVs; exact customer/system finish times 100/120.
+% Source pipeline unchanged; system now includes five seconds of exit travel.
 [d,t,cfg]=fixture(["T" "B" "C"],strings(0,1),"T",201,3);
 d=slowRow(d,103); d=setDistance(d,103,301,116);
 d=slowRow(d,102); d=setDistance(d,102,401,115);
@@ -13,9 +13,9 @@ r=simulateSchedule(1,t,d,cfg); assert(r.isFeasible);
 c=r.moveTable(r.moveTable.CargoID=="C",:); b=r.moveTable(r.moveTable.CargoID=="B",:); customer=r.moveTable(r.moveTable.ActionType=="CUSTOMER_MOVE",:);
 assert(c.PickupTime==2 && b.PickupTime==4 && customer.PickupTime==6);
 assert(customer.PickupTime<b.DropoffTime && customer.PickupTime<c.DropoffTime && b.PickupTime<c.DropoffTime);
-assert(r.CustomerCompletionMakespan==100 && r.SystemMakespan==120 && r.makespan==120 && r.finishTime==120);
+assert(r.CustomerCompletionMakespan==100 && r.SystemMakespan==125 && r.makespan==125 && r.finishTime==125);
 assert(r.TotalMoveCount==3 && r.RelocationCount==2 && r.CustomerMoveCount==1 && isempty(r.runningMoves));
-[cost,fitnessResult]=evaluateSequence(1,t,d,cfg); assert(cost==120 && fitnessResult.CustomerCompletionMakespan==100);
+[cost,fitnessResult]=evaluateSequence(1,t,d,cfg); assert(cost==125 && fitnessResult.CustomerCompletionMakespan==100);
 assert(any(r.eventLog.Time>100) && all(r.moveTable.DispatchTime<=100)); resourcesReleased(r);
 % Target clearing pipeline: C is picked before D finishes its relocation.
 [d,t,cfg]=fixture("T",["A" "B" "C" "D"],"T",203,3);
@@ -118,6 +118,7 @@ d.lanes=table(pockets(2:end),pockets(2:end),repmat((0:5)',6,1),marks(2:end),repm
  'VariableNames',{'PocketKey','PocketName','Sequence','StationMark','StationType'});
 ids=strings(36,1); ids(1:numel(source))=source(:); ids(7:6+numel(target))=target(:);
 d.cargoInitial=table(marks(2:end),ids,pockets(2:end),d.lanes.Sequence,'VariableNames',{'StationMark','CargoID','PocketName','Sequence'});
+d.lanes=[d.lanes;table(keys',keys',repmat(6,6,1),zeros(6,1),repmat("Entrance",6,1),'VariableNames',d.lanes.Properties.VariableNames)];
 d.stationToIndex=containers.Map(num2cell(marks),num2cell((1:37)'));
 d.distanceMatrix=5*ones(37); d.distanceMatrix(1,:)=1; d.distanceMatrix(1:38:end)=0;
 cfg=config(); cfg.numAGV=vehicles; cfg.agvIDs=10:10:10*vehicles; cfg.agvInitialStations=zeros(1,vehicles);

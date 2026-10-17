@@ -16,7 +16,18 @@ for mark=reshape(cfg.agvInitialStations,1,[])
   marks(end+1)=mark; %#ok<AGROW>
  end
 end
+storageKeys=unique(data.lanes.PocketKey(data.lanes.StationType=="Slot"));
+entrances=data.lanes(data.lanes.StationType=="Entrance" & ismember(data.lanes.PocketKey,storageKeys),:);
+for k=1:height(entrances)
+ mark=entrances.StationMark(k);
+ if ~ismember(mark,marks)
+  name=entrances.PocketName(k); if ismissing(name) || name=="", name=entrances.PocketKey(k); end
+  stations(end+1)=struct('id',mark,'pocket',char(name),'sequence',entrances.Sequence(k)); %#ok<AGROW>
+  marks(end+1)=mark; %#ok<AGROW>
+ end
+end
 payload.stations=stations;
+payload.vehicleLegs=repmat(struct('vehicle',0,'moveID',0,'from',0,'to',0,'start',0,'finish',0,'status',''),0,1);
 payload.vehicles=arrayfun(@(k)struct('id',cfg.agvIDs(k),'station',cfg.agvInitialStations(k)),1:cfg.numAGV);
 occupied=find(data.cargoInitial.CargoID~="");
 payload.cargo=arrayfun(@(k)struct('id',char(data.cargoInitial.CargoID(k)), ...
@@ -29,16 +40,24 @@ payload.customerCompletionTimes=result.taskFinishTime(isfinite(result.taskFinish
 if isfield(result,'moves')
  records=repmat(struct('id',0,'cargo','','pickup',0,'dropoff',0,'release',0, ...
   'vehicle',0,'from',0,'dispatchOrder',0,'start',[],'arrivePickup',[],'pickupFinish',[], ...
-  'arriveDropoff',[],'finish',[],'actionType','','parentTaskID',0),numel(result.moves),1);
+  'arriveDropoff',[],'finish',[],'actionType','','parentTaskID',0,'pickupStart',[],'dropoffStart',[]),numel(result.moves),1);
  for k=1:numel(result.moves)
   m=result.moves(k); records(k).id=m.MoveID; records(k).cargo=char(m.CargoID);
   records(k).pickup=m.SourceStation; records(k).dropoff=m.TargetStation; records(k).release=m.DispatchTime;
   records(k).vehicle=m.AGVID; records(k).from=m.FromStation; records(k).dispatchOrder=m.MoveID;
-  records(k).start=m.DispatchTime; records(k).arrivePickup=m.PickupStartTime;
-  records(k).pickupFinish=m.PickupTime; records(k).arriveDropoff=m.DropoffStartTime;
+  records(k).start=m.DispatchTime; records(k).arrivePickup=m.SourceArrivalTime; records(k).pickupStart=m.PickupStartTime;
+  records(k).pickupFinish=m.PickupTime; records(k).arriveDropoff=m.TargetArrivalTime; records(k).dropoffStart=m.DropoffStartTime;
   records(k).finish=m.CompletionTime; records(k).actionType=char(m.ActionType);
   records(k).parentTaskID=m.ParentCustomerTaskID;
   payload.duration=max(payload.duration,m.CompletionTime);
+  if isfield(m,'ExitArrivalTime') && isfinite(m.ExitArrivalTime)
+   payload.vehicleLegs(end+1)=struct('vehicle',m.AGVID,'moveID',m.MoveID, ...
+    'from',m.TargetStation,'to',m.EntranceStation,'start',m.DropoffTime,'finish',m.ExitArrivalTime,'status','退出巷道'); %#ok<AGROW>
+  end
+  if isfield(m,'HomeArrivalTime') && isfinite(m.HomeArrivalTime)
+   payload.vehicleLegs(end+1)=struct('vehicle',m.AGVID,'moveID',m.MoveID, ...
+    'from',m.EntranceStation,'to',m.HomeStation,'start',m.ReturnHomeStartTime,'finish',m.HomeArrivalTime,'status','返回Home'); %#ok<AGROW>
+  end
  end
  payload.tasks=records; return;
 end

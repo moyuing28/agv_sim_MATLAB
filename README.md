@@ -14,6 +14,10 @@
 当前 meterPerUnit=0.01（100 map unit=1m）是用户指定实验假设；metadata 的 MetersConversion 仍为 Unconfirmed，需要校准。速度单位 m/s；getTravelTime 是唯一距离到秒的换算入口。内部距离为 map unit，控制台距离转成米。Station 5 孤立，不能用于存货；所有车无法空载到取货位时方案不可行。
 
 ## 5. Lane Model
+
+卸货后的车辆收尾：DropoffTime/CompletionTime 仍为货物实际卸货完成时刻，Customer Task 同时按原规则完成，Target reservation 释放。车辆进入 ExitingLane，继续持有 Target Lane lock，按有向距离从货位驶向该 PocketKey 的真实 Entrance。到入口后进入 AtEntrance，由当前 ReadySet 和现有分车规则决定接续；同车重新进入同巷道时原 MoveID 的锁直接交接给新 MoveID。未获可派发动作的入口车辆释放锁并 ReturningHome，抵达自身初始站点后 Idle，途中不抢占。Source Pickup 立即释放的流水机制不变。
+
+退出和返程复用同一个 Runtime 事件循环，不生成货物 Move。新增 ExitStart/ExitArrival、TargetReservationReleased、LaneLockHandoff、ReturnHomeStart/HomeArrival；TargetReleased 现在表示入口离开时真正释放锁。ExitDistance、ReturnHomeDistance 是地图距离单位，计入 emptyDistance、totalDistance 和 AGV 忙碌时间各一次。CustomerCompletionMakespan 截止客户完成，SystemMakespan 等待必要退出/返程结束。Move CSV 的 VehicleFinishTime 表示该次车辆收尾结束（入口接续或返 Home），不改变 DropoffTime。HTML/GIF 使用相同的实际 Runtime 时间展示退出、返程及 Home 停留。
 Sequence=0 在深处，数值越大越靠近入口，OrderStationsDirection=DeepToEntrance。只有 Slot 可以存货和取放；Entrance、Unknown 仅为结构/导航信息。取货及放货都要求该货位外侧所有 Slot 无货。
 getSlotAccessStations 根据真实 PocketKey 与 Sequence 找外侧货位，不能把 PocketName 当唯一业务主键。货物表中的 PocketName/Sequence 是定位提示，启动时与真实 lanes 校验。
 
@@ -178,7 +182,7 @@ TotalMoveCount、RelocationCount、FillingCount、CustomerMoveCount 按已完成
 
 ### Source-release pipeline 与 Already-at-Final-Target（阶段 7C）
 
-Runtime Move：Dispatch → Reserve Source + Target → Lock Source only when operating → Pickup → Release Source immediately → Loaded Travel（Target reservation remains）→ Lock Target only when operating → Dropoff → Release Target。**Reservation != Lane Lock**。沿用 handling 完成即退出 Lane 的零独立 exit-time 模型，Source reservation/lock 在 Pickup 完成后立即释放，Target reservation 保留到 Dropoff/exit，Target lock 只覆盖实际操作；Source 不因运输/等待而继续持有。
+Runtime Move：Dispatch → Reserve Source + Target → Lock Source → Pickup → Release Source immediately → Loaded Travel → Lock Target → Dropoff → Release Target reservation → ExitingLane → AtEntrance → 接续任务或 ReturningHome。**Reservation != Lane Lock**。Source 仍使用 Pickup 完成即释放的原流水语义；Target lock 保留到真实入口离开或原子交接，不随 Dropoff 提前释放。
 
 已删除 simulateSchedule 中按相同 ParentCustomerTaskID 扫描 Running preparation 并跳过 CUSTOMER_MOVE 的逻辑。Preparation 不需要完整 Dropoff 才允许 Parent 后续 Action：任何类型 Cargo 完成 Pickup 后，occupancy/CurrentStation/Status 和源资源变化立即生效，重新 assess/build ReadySet。只有实时 Cargo 状态、outer、legal drop、hard eligibility、reservation/lock 和可达性限制后续动作；不保留或变相恢复 Parent barrier，也不改 hard edges。
 
@@ -222,7 +226,7 @@ CustomerCompletionMakespan 是最后一个 Customer taskCompletionTime；SystemM
 ## 7. Cargo, Slot and AGV State
 Slot：occupancy 为 CargoID 或空字符串；reservedBy 是预留该货位的任务行索引。
 Cargo：CargoID、CurrentStation、AGVID、Status；装车后站点为 NaN，状态 OnAGV；卸货后在目标 Slot，状态 AtSlot。
-AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory、MoveHistory、CargoID、ActiveTask、ActiveMoveID、Status。TaskHistory 记录各 Move 的 Parent 行索引，MoveHistory 记录唯一 MoveID。容量固定一件，只有完整卸货后才能接新任务。AGV 连续位置未建模；CurrentStation 在取货/卸货事件更新，不代表行驶途中实时位置。
+AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime、TaskHistory、MoveHistory、CargoID、ActiveTask、ActiveMoveID、Status。TaskHistory 记录各 Move 的 Parent 行索引，MoveHistory 记录唯一 MoveID。容量固定一件，完成卸货并到达入口后才能接新任务。CurrentStation 在取货、卸货、入口及 Home 到达事件更新，不代表行驶途中实时位置。
 
 ## 8. Current AGV Assignment Rule
 车辆为 AGV02→站点2、AGV03→站点4、AGV04→站点0、AGV05→站点3。速度及服务时间共用配置，车队同质。
@@ -240,7 +244,7 @@ prioritySequence 保留输入的 Customer 优先列表（hard eligibility 单独
 
 可选 businessEdges 是显式任务行索引边，默认 0×2；本阶段不新增业务 CSV 或配置系统。Target 与 business 边合并后统一由 validateTaskPrecedence 检查强连通分量和自环，存在环时报 AGV:CyclicTaskPrecedence，列出实际环内 TaskID/CargoID。重复最终 TargetStation 在输入加载阶段报 AGV:DuplicateCustomerTarget，列出目标站和冲突的 TaskID/CargoID。不同 Target PocketKey 不自动产生边，PocketName 仅用于显示。buildLaneConstraints 只保留为兼容 wrapper，转发到新函数，不存在第二套 Source 约束。
 任务派单时必须：货物在源站、目标为空、源外侧无货、目标外侧无货、访问货位未被其他任务预留。若任务从外侧搬到同巷道内侧，源货物在放货前已取走，不视为它对自身目的地的阻挡。
-两端仍使用端点及所有外侧 Slot 的 access-footprint reservation，owner 为 MoveID。Source 在 Pickup 完成/退出后立即释放；Target 持续保护至 Dropoff 完成/退出。独立 Lane lock 仅表示 AGV 正在实际 handling，不等于全程 reservation。
+两端仍使用端点及所有外侧 Slot 的 access-footprint reservation，owner 为 MoveID。Source 在 Pickup 完成后立即释放；Target 持续保护至 Dropoff 完成。独立 Lane lock 保护 handling 及卸货后的真实退出，不等于全程 reservation。派单须检查目标/源巷道锁，不能让其他 AGV 进入尚在退出的巷道。
 Dispatch：预留访问货位并标记 AGV 忙碌；不提前移动库存。
 Pickup：在空载行驶+Pick 完成时，源站变空，货物装上 AGV。
 Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释放预留。

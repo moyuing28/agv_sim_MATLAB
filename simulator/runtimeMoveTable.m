@@ -13,4 +13,12 @@ for m=moves
   m.SourceStation,m.TargetStation,m.DispatchTime,m.PickupTime,m.DropoffTime,m.CompletionTime, ...
   m.EmptyDistance,m.LoadedDistance,count}; %#ok<AGROW>
 end
+rows.EntranceStation=reshape([moves.EntranceStation],[],1);
+rows.ExitDistance=reshape([moves.ExitDistance],[],1);
+rows.ExitArrivalTime=reshape([moves.ExitArrivalTime],[],1);
+rows.ReturnHomeDistance=reshape([moves.ReturnHomeDistance],[],1);
+rows.ReturnHomeStartTime=reshape([moves.ReturnHomeStartTime],[],1);
+rows.HomeStation=reshape([moves.HomeStation],[],1);
+rows.HomeArrivalTime=reshape([moves.HomeArrivalTime],[],1);
+rows.VehicleFinishTime=reshape([moves.VehicleFinishTime],[],1);
 end

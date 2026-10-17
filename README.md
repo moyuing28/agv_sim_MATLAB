@@ -312,6 +312,21 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 HTML 与 GIF 共用 `buildAnimationData` 的调度时间数据。GIF 中 AGV 在站点连线上移动，装货完成后货物随车、卸货完成后货物留在终点，并显示车辆状态和同步时间轴。受阻且未派单的排程导出静态 GIF，显示受阻原因。GIF 保存在已忽略的 `results` 目录，另有 `*_animation.gif` 忽略规则，生成文件不提交 Git。
 
+## 4×4 Runtime Acceptance Dataset (Stage 7D)
+
+`acceptance/4x4/` 是独立的 synthetic deterministic validation map，不是 ProfControl 正式地图。L1–L4 各有四个 Slot，Sequence=0 最深、3 最靠入口；StationMark 分别为 101–104、201–204、301–304、401–404，入口为 105/205/305/405，Home 为 1–4。静态距离 CSV 包含全部 576 个有向 Manhattan 距离，无 NaN。Home 坐标相同，为多车流水提供相同空载到达条件，分车仍使用原 AGVID tie-break。
+
+从项目根目录运行：
+
+```matlab
+addpath('acceptance/4x4');
+[summary,runs] = runAcceptance4x4();
+```
+
+A01–A07 分别验证 Source 流水、Target 流水、两次滚动 Filling、R_SELF、Terminal Protection 与后继 FINALIZE、初始 FINALIZE、双端并行和 commit 后候选重选。固定 Customer priority，不比较优化算法。输出在 `results/acceptance_4x4/`，包括 Markdown 报告、汇总 CSV、Move/Event/最终库存、FINALIZE、任务快照、ReadySet 回放证据、逐断言结果和完整诊断 MAT。逐场景捕获失败，继续后续场景；`testAcceptance4x4` 对任意 FAIL 报错，并已接入原回归末尾。
+
+`config.m` 默认地图路径仍指向原正式文件；`loadSimulationData` 优先读取 cfg 的 stationFile/laneFile/distanceFile/metadataFile，旧 cfg 缺少字段时回退 projectRoot 原路径。只有 `acceptanceConfig4x4` 切换到验收地图和场景输入，关闭图像与动画。正常 `main` 仍读取正式大地图，验收不会覆盖正式地图或 Cargo/Task 输入。baseline 选择器和 Runtime 算法未修改。
+
 ## 17. AI Modification Guidelines
 先读 README。禁止修改原始 CSV 或用户手动输入、对称化距离、填 NaN、把 Unknown 当 Slot、用站点号直接索引。参数放 config；算法解耦；修改货位预留/事件时间/容量/任务规则同步文档和测试。原始 metadata 与用户物理比例假设保持区分。新增临时搬运之前不能伪造障碍货已被移走。
 

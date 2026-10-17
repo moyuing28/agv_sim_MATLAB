@@ -1,0 +1,9 @@
+Dataset=Acceptance4x4
+SyntheticMap=True
+LaneCount=4
+SlotPerLane=4
+SlotCount=16
+SequenceDirection=DeepToEntrance
+SequenceBase=0
+DistanceType=SyntheticManhattan
+Purpose=RuntimeEndToEndAcceptance

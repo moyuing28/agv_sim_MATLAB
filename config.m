@@ -6,6 +6,10 @@
 % Notes: Directed distances and NaN are preserved; algorithms remain separate.
 function cfg = config()
 cfg.projectRoot = fileparts(mfilename('fullpath'));
+cfg.stationFile = fullfile(cfg.projectRoot,'stations.csv');
+cfg.laneFile = fullfile(cfg.projectRoot,'lanes.csv');
+cfg.distanceFile = fullfile(cfg.projectRoot,'distance_matrix.csv');
+cfg.metadataFile = fullfile(cfg.projectRoot,'metadata.txt');
 cfg.meterPerUnit = 0.01;
 cfg.agvSpeed = 1.0;
 cfg.pickTime = 5;

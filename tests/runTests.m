@@ -155,6 +155,7 @@ emptyGIF=fullfile(fixtureDir,'empty.gif');
 exportScheduleGIF(r,tasks,data,gifCfg,'Empty schedule',emptyGIF);
 assert(numel(imfinfo(emptyGIF))==1);
 clear fixtureCleanup;
+testAcceptance4x4(); % After all original-map regression checks.
 fprintf('All cargo/event scheduling tests passed.\n');
 
 function testLaneHelpers(realData,blank)

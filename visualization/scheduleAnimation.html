@@ -6,6 +6,9 @@
 <style>
 :root{font-family:Segoe UI,Microsoft YaHei,sans-serif;color:#23334d;background:#f0f4fa}*{box-sizing:border-box}body{margin:0;padding:24px}header{display:flex;justify-content:space-between;align-items:center;gap:16px}h1{font-size:25px;margin:0 0 8px}p{margin:0;color:#65758b;font-size:13px}.badge{background:#e0f4ea;color:#167148;border-radius:20px;padding:8px 16px;white-space:nowrap}.badge.blocked{background:#fff0d8;color:#925800}.notice{margin-top:16px;background:#fff3de;border:1px solid #eac689;border-radius:12px;padding:14px;overflow-wrap:anywhere}.panel{background:white;border:1px solid #dce4ef;border-radius:16px;padding:18px;margin-top:18px;box-shadow:0 4px 18px #283b5710}.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}button,select{font:inherit;border:1px solid #ccd8e8;border-radius:8px;background:white;padding:8px 13px;color:#23334d;cursor:pointer}button.primary{background:#245ce0;color:white;border-color:#245ce0}button:disabled{opacity:.4;cursor:default}input[type=range]{flex:1;min-width:160px;accent-color:#245ce0}.clock{font-variant-numeric:tabular-nums;min-width:160px;font-weight:600}.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px}/* Fit the entire station map inside the playback window without inner scrollbars. */
 .mapwrap{height:clamp(220px,65vh,660px);overflow:hidden;background:#f8faff;border-radius:10px}
+.map-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.map-tools button{padding:6px 12px}.map-zoom{min-width:48px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums}
+.map-hint{font-size:12px;color:#65758b}.map{touch-action:none;user-select:none}.map.can-pan{cursor:grab}.map.is-panning{cursor:grabbing}
 .map{display:block;width:100%;height:100%;min-width:0}.legend{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:#65758b;margin:12px 0}.swatch{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:middle;border-radius:3px}.vehicle-card{padding:12px 0;border-bottom:1px solid #e5ebf3;font-size:13px}.vehicle-card:last-child{border:0}.vehicle-name{font-weight:700;margin-bottom:6px}.sub{color:#65758b;font-size:12px;line-height:1.8}.progress{height:5px;border-radius:3px;background:#e5ebf3;margin-top:7px;overflow:hidden}.progress span{display:block;height:100%;background:#e8a23a}h2{font-size:16px;margin:0 0 12px}.timeline-wrap{overflow:auto}.timeline{width:100%;min-width:850px;display:block}.table-wrap{overflow:auto;max-height:300px}table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}th{position:sticky;top:0;background:#f2f5fa;color:#65758b}td,th{padding:10px;border-bottom:1px solid #e5ebf3;white-space:nowrap}.status{font-weight:600}.summary{font-size:13px;color:#65758b;margin-left:auto}@media(max-width:1000px){.layout{grid-template-columns:1fr}body{padding:12px}header{align-items:flex-start}.summary{margin-left:0}}
 </style>
 </head>
@@ -19,7 +22,7 @@
 <span id="summary" class="summary"></span>
 </section>
 <div class="layout">
-<section class="panel"><h2>站点与运输</h2><div class="legend"><span><i class="swatch" style="background:#f3b64f"></i>货物（含未参与任务的货物）</span><span>虚线：空载 / 未派单请求</span><span>实线：载货运输</span><span>站点按巷道分组，连线不代表真实导航路径</span></div><div class="mapwrap"><svg id="map" class="map" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AGV 与货物动画"></svg></div></section>
+<section class="panel"><h2>站点与运输</h2><div class="legend"><span><i class="swatch" style="background:#f3b64f"></i>货物（含未参与任务的货物）</span><span>虚线：空载 / 未派单请求</span><span>实线：载货运输</span><span>站点按巷道分组，连线不代表真实导航路径</span></div><div class="map-tools" role="group" aria-label="地图视角"><button id="map-zoom-out" type="button" aria-label="缩小地图" title="缩小">−</button><output id="map-zoom" class="map-zoom" aria-label="相对全图的缩放比例">100%</output><button id="map-zoom-in" type="button" aria-label="放大地图" title="放大">＋</button><button id="map-fit" type="button">全图</button><span class="map-hint">滚轮缩放 · 放大后按住拖动画面</span></div><div class="mapwrap"><svg id="map" class="map" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AGV 与货物动画"></svg></div></section>
 <aside class="panel"><h2>AGV 实时状态</h2><div id="vehicles"></div><p id="rate" style="margin-top:16px"></p></aside>
 </div>
 <section class="panel"><h2>任务时间轴</h2><div class="legend"><span><i class="swatch" style="background:#afbdd0"></i>空载行驶</span><span><i class="swatch" style="background:#f3b64f"></i>装货 / 卸货</span><span><i class="swatch" style="background:#477bea"></i>载货行驶（按车辆颜色）</span></div><div class="timeline-wrap"><svg id="timeline" class="timeline" role="img" aria-label="任务时间轴"></svg></div></section>
@@ -81,7 +84,64 @@ for(let row=0;row<groupList.length;row+=cols){let height=0;
   height=Math.max(height,stations.length*60+65);
  }y+=height;
 }
-$('map').setAttribute('viewBox',`0 0 ${cols*cw+20} ${Math.max(150,y)}`);
+// Viewport controls change only the SVG viewBox; simulation coordinates stay fixed.
+const mapSVG=$('map'),fullMapView={x:0,y:0,width:cols*cw+20,height:Math.max(150,y)},maxMapZoom=8;
+let mapView={...fullMapView},mapZoom=1,mapDrag=null;
+function applyMapView(){
+ mapView.x=Math.max(0,Math.min(fullMapView.width-mapView.width,mapView.x));
+ mapView.y=Math.max(0,Math.min(fullMapView.height-mapView.height,mapView.y));
+ mapSVG.setAttribute('viewBox',`${mapView.x} ${mapView.y} ${mapView.width} ${mapView.height}`);
+ $('map-zoom').textContent=`${Math.round(mapZoom*100)}%`;
+ $('map-zoom-out').disabled=mapZoom<=1;
+ $('map-zoom-in').disabled=mapZoom>=maxMapZoom;
+ $('map-fit').disabled=mapZoom<=1;
+ mapSVG.classList.toggle('can-pan',mapZoom>1);
+}
+function mapPoint(clientX,clientY,inverse){
+ const point=mapSVG.createSVGPoint();point.x=clientX;point.y=clientY;
+ return point.matrixTransform(inverse);
+}
+function endMapDrag(){
+ if(!mapDrag)return;
+ const pointerID=mapDrag.id;mapDrag=null;mapSVG.classList.remove('is-panning');
+ if(mapSVG.hasPointerCapture(pointerID))mapSVG.releasePointerCapture(pointerID);
+}
+function zoomMap(factor,clientX,clientY){
+ endMapDrag();
+ const nextZoom=Math.max(1,Math.min(maxMapZoom,mapZoom*factor));
+ if(nextZoom===mapZoom)return;
+ let anchor={x:mapView.x+mapView.width/2,y:mapView.y+mapView.height/2};
+ if(clientX!==undefined){const matrix=mapSVG.getScreenCTM();if(!matrix)return;anchor=mapPoint(clientX,clientY,matrix.inverse());}
+ const fractionX=Math.max(0,Math.min(1,(anchor.x-mapView.x)/mapView.width));
+ const fractionY=Math.max(0,Math.min(1,(anchor.y-mapView.y)/mapView.height));
+ const width=fullMapView.width/nextZoom,height=fullMapView.height/nextZoom;
+ mapView={x:anchor.x-fractionX*width,y:anchor.y-fractionY*height,width,height};
+ mapZoom=nextZoom;applyMapView();
+}
+$('map-zoom-in').onclick=()=>zoomMap(1.25);
+$('map-zoom-out').onclick=()=>zoomMap(1/1.25);
+$('map-fit').onclick=()=>{endMapDrag();mapZoom=1;mapView={...fullMapView};applyMapView();};
+mapSVG.addEventListener('wheel',event=>{
+ event.preventDefault();
+ const units=event.deltaMode===1?16:event.deltaMode===2?mapSVG.clientHeight:1;
+ const delta=Math.max(-100,Math.min(100,event.deltaY*units));
+ zoomMap(Math.exp(-delta*.002),event.clientX,event.clientY);
+},{passive:false});
+mapSVG.addEventListener('pointerdown',event=>{
+ if(event.button!==0||!event.isPrimary||mapZoom<=1)return;
+ const matrix=mapSVG.getScreenCTM();if(!matrix)return;
+ const inverse=matrix.inverse();
+ mapDrag={id:event.pointerId,inverse,point:mapPoint(event.clientX,event.clientY,inverse),x:mapView.x,y:mapView.y};
+ mapSVG.setPointerCapture(event.pointerId);mapSVG.classList.add('is-panning');event.preventDefault();
+});
+mapSVG.addEventListener('pointermove',event=>{
+ if(!mapDrag||event.pointerId!==mapDrag.id)return;
+ const point=mapPoint(event.clientX,event.clientY,mapDrag.inverse);
+ mapView.x=mapDrag.x-(point.x-mapDrag.point.x);mapView.y=mapDrag.y-(point.y-mapDrag.point.y);
+ applyMapView();
+});
+for(const eventName of ['pointerup','pointercancel','lostpointercapture'])mapSVG.addEventListener(eventName,event=>{if(mapDrag&&event.pointerId===mapDrag.id)endMapDrag();});
+applyMapView();
 const defs=svg($('map'),'defs');const marker=svg(defs,'marker',{id:'arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'});svg(marker,'path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#a3b2cb'});
 const routeLayer=svg($('map'),'g'),stationLayer=svg($('map'),'g'),cargoLayer=svg($('map'),'g'),vehicleLayer=svg($('map'),'g');
 const routes=[];

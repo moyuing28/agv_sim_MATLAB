@@ -5,11 +5,15 @@
 %
 % Notes: Input CSVs are read-only; no automatic obstacle relocation.
 function outer = getSlotAccessStations(station,data)
-slots=data.lanes(data.lanes.StationType=="Slot",:);
-membership=slots(slots.StationMark==station,:); outer=zeros(0,1);
-for k=1:height(membership)
- rows=slots(slots.PocketKey==membership.PocketKey(k) & slots.Sequence>membership.Sequence(k),:);
- outer=[outer;rows.StationMark]; %#ok<AGROW>
+isSlot=data.lanes.StationType=="Slot";
+marks=data.lanes.StationMark; keys=data.lanes.PocketKey; sequences=data.lanes.Sequence;
+membership=find(isSlot & marks==station);
+access=false(height(data.lanes),1);
+for k=1:numel(membership)
+ row=membership(k);
+ access=access | (isSlot & keys==keys(row) & sequences>sequences(row));
 end
-outer=unique(outer);
+% The old concatenation also ended with sorted, duplicate-free station marks.
+outer=zeros(0,1);
+if any(access), outer=unique([outer;marks(access)]); end
 end

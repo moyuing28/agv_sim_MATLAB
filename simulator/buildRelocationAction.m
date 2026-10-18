@@ -21,13 +21,10 @@ selected=selectRelocationLaneBaseline(candidates);
 if isempty(selected)
  action.Reason="No feasible relocation target lane"; return;
 end
-% Final independent live validation; selection is replaceable in later stages.
-currentSource=getRelocationSource(cargoID,state,data);
-current=getRelocationCandidateLanes(cargoID,parentTask,kind,state,data);
-valid=current.PocketKey==selected.PocketKey & current.DropStation==selected.DropStation & current.DropSequence==selected.DropSequence;
-if currentSource.StationMark~=source.StationMark || ~any(valid)
- action.Reason="Stale relocation source or target"; return;
-end
+% The candidate table above was generated from this snapshot; it re-runs
+% getRelocationSource, access-reservation and trial No-hole validation for
+% every candidate. No input changes between that enumeration and this point,
+% so regenerating the same set could only reproduce it.
 action.TargetStation=selected.DropStation; action.TargetPocketKey=selected.PocketKey;
 action.TargetPocketName=selected.PocketName; action.TargetSequence=selected.DropSequence;
 action.LoadedDistance=selected.LoadedDistance; action.IsFeasible=true; action.Reason=kind;

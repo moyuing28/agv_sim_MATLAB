@@ -1,9 +1,11 @@
 function cargo = getOuterCargo(pocketKey,state,data)
 %GETOUTERCARGO One-row CargoID/StationMark/Sequence table; empty Lane: 0 rows.
 [station,sequence,id]=getLaneFrontier(pocketKey,state,data);
-cargo=table(strings(0,1),zeros(0,1),zeros(0,1), ...
- 'VariableNames',{'CargoID','StationMark','Sequence'});
 if sequence~=-1
- cargo(end+1,:)={id,station,sequence};
+ % The former row assignment converted into string/double/double columns.
+ id=string(id); station=double(station); sequence=double(sequence);
+else
+ id=strings(0,1); station=zeros(0,1); sequence=zeros(0,1);
 end
+cargo=table(id,station,sequence,'VariableNames',{'CargoID','StationMark','Sequence'});
 end

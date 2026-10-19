@@ -4,8 +4,10 @@ if nargin<3, overrides=struct(); end
 if nargin<4, progressFcn=[]; end
 assert(isempty(progressFcn) || isa(progressFcn,'function_handle'),'AGV:GAProgress','Progress observer must be a function handle.');
 options=gaOptions(overrides); stream=RandStream('mt19937ar','Seed',options.seed);
+searchClock=tic; currentGeneration=0; observer=[];
+if ~isempty(progressFcn), observer=@evaluationProgress; end
 [initial,attempts,complete]=gaInitializePopulation(mapping,options,stream,true);
-[evaluate,getStats,getBudget]=gaCreateEvaluator(mapping,evaluator,options.maxUniqueEvaluations);
+[evaluate,getStats,getBudget,getTiming]=gaCreateEvaluator(mapping,evaluator,options.maxUniqueEvaluations,observer,searchClock);
 population=repmat(evaluate(initial{1}),1,numel(initial));
 evaluatedCount=1;
 for k=2:numel(initial)
@@ -16,7 +18,7 @@ population=population(1:evaluatedCount); % No unevaluated initial GS enters a po
 population=population(gaRankCandidates(population)); best=population(1);
 local=emptyLocal(); stall=0; noNewCount=0;
 history=record(0,population,best,getStats(),0,local,stall);
-if ~isempty(progressFcn), progressFcn(history(end),options); end
+generationProgress(history(end));
 rejectedCrossover=0; rejectedMutation=0;
 stopReason=""; budget=getBudget();
 if budget.remaining==0, stopReason="budgetExhausted";
@@ -26,6 +28,7 @@ end
 logSpace=gammaln(numel(mapping.taskRows)+1)-sum(gammaln(mapping.counts+1));
 for generation=1:options.maxGenerations
  if strlength(stopReason)>0, break; end
+ currentGeneration=generation;
  oldBest=best; before=getStats();
  offspring=population([]);
  for k=1:options.offspringCount
@@ -61,7 +64,7 @@ for generation=1:options.maxGenerations
  elseif noNewCount>=options.stallGenerations, stopReason="noNewCandidates";
  end
  history(end+1)=record(generation,population,best,after,numel(offspring),local,stall); %#ok<AGROW>
- if ~isempty(progressFcn), progressFcn(history(end),options); end
+ generationProgress(history(end));
 end
 if strlength(stopReason)==0, stopReason="maxGenerations"; end
 history(end).stopReason=stopReason;
@@ -69,6 +72,14 @@ run=struct('best',best,'population',population,'history',history,'options',optio
  'stopReason',stopReason,'budget',getBudget(),'generationsCompleted',history(end).generation);
 run.stats.initializationProposalCount=attempts;
 run.stats.rejectedCrossoverCount=rejectedCrossover; run.stats.rejectedMutationCount=rejectedMutation;
+if ~isempty(progressFcn), run.timing=getTiming(); end
+ function evaluationProgress(event)
+  event.generation=currentGeneration; progressFcn(event,options);
+ end
+ function generationProgress(row)
+  if isempty(progressFcn), return; end
+  row.type="generation"; row.timing=getTiming(); progressFcn(row,options);
+ end
 end
 function row=record(generation,population,best,stats,offspringCount,local,stall)
 row=struct('generation',generation,'bestKey',best.key,'bestEvaluation',best.evaluation, ...

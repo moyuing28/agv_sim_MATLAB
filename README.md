@@ -326,9 +326,9 @@ testGSPopulationSelection; % 人工候选：精英、质量容差、最大最小
 
 在 MATLAB R2022a 打开 `main.m` 点击 Run，程序会通过现有 `runGSMemeticExperiment` 顺序执行一次原始 FCFS、一次 GS 搜索、一次最优 TS 复算。main 不重复调用 FCFS 或仿真器。顶部参数为种群 12、子代 8、锦标赛 3、交叉 0.8、交换变异 0.2、首次改进每代最多 3 次新评价、全局唯一评价上限 100、种子 42、停滞停止关闭、最大代数 100；算法默认参数不变。
 
-初始化完成（第 0 代）及每代完成后显示代数、唯一评价使用量、缓存命中、全局最优 SystemMakespan 和可行性。搜索期间不写正式文件；最优缓存指标逐字段精确复算通过后，才向新的独立目录导出。总距离同时显示地图单位与按实际 cfg.meterPerUnit 换算的米；不可行/死锁状态保留，不能计算改善率时显示不可用。
+初始第 1 次及每次新 GS 评价开始前显示 Evaluating 编号/预算，完成后显示本次耗时、已完成次数、缓存命中、最佳指标与可行性、累计搜索耗时、平均评价耗时和估计剩余时间；不足两个样本时显示估计中。缓存命中不逐条打印，每代汇总继续保留。FCFS、最优 TS 复算和导出分别显示开始/完成及耗时。剩余时间只按剩余预算估计，实际停止原因优先。搜索期间不写正式文件；最优缓存指标逐字段精确复算通过后，才向新的独立目录导出。总距离同时显示地图单位与按实际 cfg.meterPerUnit 换算的米；不可行/死锁状态保留，不能计算改善率时显示不可用。
 
-本轮只做静态接口及 Git diff 检查，未启动 MATLAB、未执行 main、仿真、优化、导出或回归测试；正式运行及输出效果待用户验证。文件清单和调用说明见 [algorithms/GS_EXPERIMENT.md](algorithms/GS_EXPERIMENT.md)。
+阶段 4B 集成只做静态检查；随后进度/计时专项运行了 testGSProgressTiming 人工评价测试，未执行 main、真实仿真、优化或导出；正式运行及输出效果待用户验证。文件清单和调用说明见 [algorithms/GS_EXPERIMENT.md](algorithms/GS_EXPERIMENT.md)。
 
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。

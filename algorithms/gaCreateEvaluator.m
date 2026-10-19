@@ -1,6 +1,9 @@
-function [evaluate,getStats,getBudget] = gaCreateEvaluator(mapping,evaluator,maxUniqueEvaluations)
+function [evaluate,getStats,getBudget,getTiming] = gaCreateEvaluator(mapping,evaluator,maxUniqueEvaluations,progressFcn,searchClock)
 %GACREATEEVALUATOR New in-memory cache per run; evaluator takes decoded TS.
 assert(isa(evaluator,'function_handle'),'AGV:GAEvaluator','Evaluator must be a function handle.');
+if nargin<4, progressFcn=[]; end
+if nargin<5, searchClock=tic; end
+assert(isempty(progressFcn) || isa(progressFcn,'function_handle'),'AGV:GAProgress','Expected an evaluation observer.');
 if nargin<3, defaults=gaOptions(); maxUniqueEvaluations=defaults.maxUniqueEvaluations; end
 assert(isnumeric(maxUniqueEvaluations) && isreal(maxUniqueEvaluations) && isscalar(maxUniqueEvaluations) && ...
  isfinite(maxUniqueEvaluations) && maxUniqueEvaluations>=0 && maxUniqueEvaluations==fix(maxUniqueEvaluations), ...
@@ -8,7 +11,8 @@ assert(isnumeric(maxUniqueEvaluations) && isreal(maxUniqueEvaluations) && isscal
 cache=containers.Map('KeyType','char','ValueType','any');
 stats=struct('candidateGeneratedCount',0,'uniqueEvaluationCount',0,'cacheHitCount',0);
 budgetDenied=0; localDenied=0;
-evaluate=@lookup; getStats=@snapshot; getBudget=@budgetSnapshot;
+completed=0; evaluationSeconds=zeros(1,0); bestObserved=[];
+evaluate=@lookup; getStats=@snapshot; getBudget=@budgetSnapshot; getTiming=@timingSnapshot;
  function [candidate,status]=lookup(gs,allowNew)
   if nargin<2, allowNew=true; end
   assert(isscalar(allowNew) && ismember(allowNew,[0 1]),'AGV:GABudget','allowNew must be logical.');
@@ -25,11 +29,30 @@ evaluate=@lookup; getStats=@snapshot; getBudget=@budgetSnapshot;
   % Reserve before invoking user code. Exceptions propagate and are never cached.
   stats.uniqueEvaluationCount=stats.uniqueEvaluationCount+1;
   stats.candidateGeneratedCount=stats.candidateGeneratedCount+1;
-  e=evaluator(ts); e=normalize(e);
-  assert(isnan(e.CompletedCustomerCount) || e.CompletedCustomerCount<=numel(ts), ...
-   'AGV:GAEvaluation','Completed-customer count exceeds task count.');
-  candidate=struct('gs',reshape(gs,1,[]),'ts',ts,'key',key,'evaluation',e);
+  notify("evaluationStart",NaN,NaN,"","");
+  evaluationClock=tic;
+  try
+   e=evaluator(ts); duration=toc(evaluationClock); e=normalize(e);
+   assert(isnan(e.CompletedCustomerCount) || e.CompletedCustomerCount<=numel(ts), ...
+    'AGV:GAEvaluation','Completed-customer count exceeds task count.');
+   candidate=struct('gs',reshape(gs,1,[]),'ts',ts,'key',key,'evaluation',e);
+  catch err
+   % Report observational diagnostics, then preserve the ORIGINAL exception.
+   try
+    notify("evaluationError",toc(evaluationClock),NaN,string(err.identifier),string(getReport(err,'extended','hyperlinks','off')));
+   catch observerError
+    fprintf(2,'Progress observer failed while reporting %s: %s\n',err.identifier,observerError.message);
+   end
+   rethrow(err);
+  end
   cache(char(key))=candidate; status="evaluated";
+  completed=completed+1; evaluationSeconds(end+1)=duration;
+  if isempty(bestObserved)
+   bestObserved=candidate;
+  else
+   ranked=[bestObserved candidate]; order=gaRankCandidates(ranked); bestObserved=ranked(order(1));
+  end
+  notify("evaluationComplete",duration,e.isFeasible,"","");
  end
  function value=snapshot()
   value=stats;
@@ -37,6 +60,27 @@ evaluate=@lookup; getStats=@snapshot; getBudget=@budgetSnapshot;
  function value=budgetSnapshot()
   value=struct('limit',maxUniqueEvaluations,'remaining',maxUniqueEvaluations-stats.uniqueEvaluationCount, ...
    'budgetDeniedCount',budgetDenied,'localDeniedCount',localDenied);
+ end
+ function value=timingSnapshot()
+  average=NaN; remaining=NaN; last=NaN;
+  if completed>0, average=sum(evaluationSeconds)/completed; last=evaluationSeconds(end); end
+  if completed>=2, remaining=average*max(0,maxUniqueEvaluations-completed); end
+  value=struct('completedEvaluationCount',completed,'evaluationSeconds',evaluationSeconds, ...
+   'lastEvaluationSeconds',last,'meanEvaluationSeconds',average, ...
+   'totalEvaluationSeconds',sum(evaluationSeconds),'searchElapsedSeconds',toc(searchClock), ...
+   'estimatedRemainingSeconds',remaining);
+ end
+ function notify(type,duration,feasible,errorIdentifier,errorReport)
+  if isempty(progressFcn), return; end
+  bestTime=NaN; bestFeasible=false;
+  if ~isempty(bestObserved)
+   bestTime=bestObserved.evaluation.SystemMakespan; bestFeasible=bestObserved.evaluation.isFeasible;
+  end
+  event=struct('type',type,'evaluationNumber',stats.uniqueEvaluationCount,'stats',stats, ...
+   'timing',timingSnapshot(),'evaluationSeconds',duration,'candidateIsFeasible',feasible, ...
+   'globalBestSystemMakespan',bestTime,'globalBestIsFeasible',bestFeasible, ...
+   'errorIdentifier',errorIdentifier,'errorReport',errorReport);
+  progressFcn(event);
  end
 end
 function e=normalize(e)

@@ -18,26 +18,32 @@ end
 % Override only this invocation, never gaOptions/config defaults.
 if ~isfield(overrides,'maxUniqueEvaluations'), overrides.maxUniqueEvaluations=3; end
 if ~isfield(overrides,'maxGenerations'), overrides.maxGenerations=2; end
-gaOptions(overrides); % Fail invalid invocation parameters before any simulation.
+progressOptions=gaOptions(overrides); % Validate before any simulation.
 cfg=config(); data=loadSimulationData(cfg); dataReport=validateInputData(data);
 [tasks,cargoInitial]=loadTaskConfiguration(data,cfg);
 data.cargoInitial=cargoInitial; validateInputData(data,tasks,cfg);
 business=zeros(0,2); if isfield(cfg,'businessEdges'), business=cfg.businessEdges; end
 mapping=buildGSMapping(tasks,data.lanes,business);
 seqFCFS=fcfsSequence(tasks); % Original row order, no precedence repair/encoding.
+stageProgress("stageStart","FCFS",0,[]); phaseClock=tic;
 resultFCFS=simulateSchedule(seqFCFS,tasks,data,cfg);
+fcfsSeconds=toc(phaseClock); stageProgress("stageComplete","FCFS",fcfsSeconds,resultFCFS);
 evaluations=struct('key',{},'ts',{},'evaluation',{});
+phaseClock=tic;
 search=runGSGeneticAlgorithm(mapping,@evaluate,overrides,progressFcn);
+searchSeconds=toc(phaseClock);
 assert(search.stats.uniqueEvaluationCount==numel(evaluations),'AGV:Experiment','Evaluator count mismatch.');
 assert(numel(unique(string({evaluations.key})))==numel(evaluations),'AGV:Experiment','A unique evaluation was repeated.');
 assert(isequal(decodeGS(search.best.gs,mapping),search.best.ts),'AGV:Experiment','Best GS/TS mismatch.');
 % One validation replay outside the optimization budget; also supplies full logs.
+stageProgress("stageStart","Best TS replay",0,[]); phaseClock=tic;
 bestResult=simulateSchedule(search.best.ts,tasks,data,cfg);
 metrics=fieldnames(search.best.evaluation); replay=project(bestResult);
 for k=1:numel(metrics)
  assert(isequaln(search.best.evaluation.(metrics{k}),replay.(metrics{k})), ...
   'AGV:ExperimentReplay','Best replay differs in %s.',metrics{k});
 end
+replaySeconds=toc(phaseClock); stageProgress("stageComplete","Best TS replay",replaySeconds,bestResult);
 comparison=table(["FCFS";"GS-Memetic"],'VariableNames',{'Algorithm'});
 names={'isFeasible','isDeadlocked','SystemMakespan','CustomerCompletionMakespan', ...
  'TotalMoveCount','totalDistance','RelocationCount','FillingCount','failureReason'};
@@ -62,13 +68,25 @@ experiment=struct('cfg',cfg,'data',data,'dataReport',dataReport,'tasks',tasks, .
  'evaluations',evaluations,'bestResult',bestResult,'comparison',comparison, ...
  'SystemMakespanImprovementPercent',improvement,'replayExact',true, ...
  'simulationCallCount',numel(evaluations)+2,'outputDirectory',string(outputDirectory));
+experiment.timing=struct('fcfsSeconds',fcfsSeconds,'searchSeconds',searchSeconds,'replaySeconds',replaySeconds);
 if strlength(string(outputDirectory))>0
+ stageProgress("stageStart","Export",0,[]); phaseClock=tic;
  exportGSMemeticExperiment(experiment,outputDirectory);
+ experiment.timing.exportSeconds=toc(phaseClock);
+ stageProgress("stageComplete","Export",experiment.timing.exportSeconds,[]);
 end
  function e=evaluate(ts)
   e=gaEvaluateSimulation(ts,tasks,data,cfg);
   gs=encodeTS(ts,mapping);
   evaluations(end+1)=struct('key',gsCanonicalString(gs,mapping),'ts',ts,'evaluation',e);
+ end
+ function stageProgress(type,name,elapsed,result)
+  if isempty(progressFcn), return; end
+  event=struct('type',type,'stage',name,'elapsedSeconds',elapsed);
+  if ~isempty(result)
+   event.SystemMakespan=result.SystemMakespan; event.isFeasible=result.isFeasible;
+  end
+  progressFcn(event,progressOptions);
  end
 end
 function e=project(r)

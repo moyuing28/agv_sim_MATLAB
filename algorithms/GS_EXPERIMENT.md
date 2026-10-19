@@ -25,11 +25,44 @@ comparison, then exports once after replayExact is asserted. No simulation
 or algorithm is reimplemented in main, and no second baseline is launched.
 
 Optional progressFcn is forwarded as the fourth argument of
-runGSGeneticAlgorithm. It receives (historyRow,options) after generation 0
-and each completed generation. printGSMemeticProgress only prints generation,
-unique count / configured budget, cache hits, best SystemMakespan and feasibility.
+runGSGeneticAlgorithm. It receives (event,options) before/after every new
+evaluation, on evaluation errors, and after generation 0 and each generation.
+The experiment service also emits FCFS/replay/optional-export stage events;
+main uses the same printGSMemeticProgress formatter for its export events.
+Cache hits only update counters; they do not emit per-hit console output.
+Initialization evaluation events carry generation=0, so the first simulation
+is announced without waiting for all twelve initial evaluations.
 Existing callers omitting the observer retain the same behavior and defaults.
 The observer is not stored in algorithm options/results, and errors propagate.
+
+Timing is observational: explicit tic/toc handles track each evaluator call,
+search elapsed time, mean successful returned-evaluation duration and the
+remaining-budget estimate. Returned infeasible schedules count as completed
+evaluations too. The first sample shows ETA as estimating; after two completed
+samples ETA is mean evaluation time times remaining evaluation budget. This
+assumes all remaining budget is used and excludes future FCFS/replay/export
+cost; actual stop conditions take precedence. It is not a completion promise.
+Reserved budget and completed counts are separate during in-flight evaluations.
+The diagnostic best uses the existing candidate ranking across evaluated GS;
+it never feeds back into selection, random streams or the evaluator budget.
+
+getStats retains its original three-field schema. gaCreateEvaluator adds an
+optional observer/search-clock input and fourth output getTiming. Wall-clock
+values are never added to candidate/cache metrics. With progress enabled,
+search.timing records evaluation durations; experiment.timing records FCFS,
+search and validated replay duration. Export duration is measured afterward
+in the returned/workspace experiment.timing.exportSeconds, so it is not part
+of the earlier MAT snapshot written by the exporter. Without an observer the
+GA's returned structure remains unchanged, preserving deterministic tests.
+
+Evaluation exceptions emit number, elapsed time, identifier and full report,
+then rethrow the original exception. They are neither cached nor returned as
+infeasible schedules. Even an exception from error-reporting observers does
+not replace the original evaluation exception.
+
+`addpath('tests'); testGSProgressTiming` exercises only artificial evaluations,
+progress formatting and timing. It invokes no optimizer, simulator or exporter.
+The progress/timing change was not validated by a real experiment.
 
 Exports go to a new `results/gs_memetic_<timestamp>_<unique-token>/`.
 The directory is created only after search/replay. Existing paths are rejected.

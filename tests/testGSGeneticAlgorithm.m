@@ -63,14 +63,14 @@ end
 assert(isequal(gaRankCandidates(failures),[3 2 1]));
 for k=1:3, failures(k).evaluation.CompletedCustomerCount=NaN; end
 assert(isequal(gaRankCandidates(failures),1:3));
-% Merge de-duplicates before diversity. A threshold of 1 forces rank refill.
+% Merge de-duplicates before quality-banded max-min selection.
 pool=repmat(first,1,12);
 for k=1:12, pool(k)=evaluate(initial{k}); end
 sorted=pool(gaRankCandidates(pool));
-[next,info]=gaSelectPopulation([pool pool(1:4)],12,1);
+[next,info]=gaSelectPopulation([pool pool(1:4)],12,o,sorted(1).key);
 assert(numel(next)==12 && numel(unique(string({next.key})))==12);
-assert(info.uniqueMergedCount==12 && info.refillCount>0 && next(1).key==sorted(1).key);
-% Explicit positional diversity fixture: similar second best, distant third.
+assert(info.uniqueMergedCount==12 && info.eliteCount==6 && info.historicalBestVerified && next(1).key==sorted(1).key);
+% A requested population of two is entirely protected by the six-elite rule.
 diverse=repmat(first,1,3);
 diverse(1).gs=["A" "A" "B" "B"]; diverse(2).gs=["A" "B" "A" "B"];
 diverse(3).gs=["B" "B" "A" "A"];
@@ -78,8 +78,8 @@ for k=1:3
  diverse(k).key=string(k); diverse(k).evaluation=candidates(2).evaluation;
  diverse(k).evaluation.SystemMakespan=k;
 end
-picked=gaSelectPopulation(diverse,2,0.75);
-assert(isequal(string({picked.key}),["1" "3"]));
+picked=gaSelectPopulation(diverse,2,o,diverse(1).key);
+assert(isequal(string({picked.key}),["1" "2"]));
 % Complete short runs, isolated RNG, reproducible history and elite survival.
 % Preserve the stage-2-only regression with new optional features disabled.
 settings=struct('seed',44,'maxGenerations',3,'localSearchEvaluations',0,'enableStallStop',false);

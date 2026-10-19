@@ -16,7 +16,7 @@ remain outside scope. FCFS and the simulator remain unchanged.
 | `gaCrossover(a,b,mapping,cuts)` | Valid parents; two distinct positions | Child and accepted flag |
 | `gaSwapMutation(gs,mapping,positions)` | Valid GS; two distinct positions | Child and accepted flag |
 | `gaRankCandidates(candidates)` | Evaluated candidates | Best-first indices with one deterministic total order |
-| `gaSelectPopulation(candidates,count,minDistance)` | Merged candidates, desired size, normalized distance | Unique next population and diversity/refill statistics |
+| `gaSelectPopulation(candidates,count,options,historicalBestKey)` | Merged candidates, desired size, centralized options, optional incumbent key | Unique next population and quality/diversity/refill diagnostics |
 | `gaCreateEvaluator(mapping,evaluator)` | Mapping and `evaluator(ts)` function handle | `evaluate(gs)` and `getStats()` closure handles, fresh run-local cache |
 | `gaEvaluateSimulation(ts,tasks,data,cfg)` | Decoded TS and original simulator inputs | Required metrics and reliable completed-customer count |
 | `runGSGeneticAlgorithm(mapping,evaluator,overrides)` | Mapping, injected evaluator, optional parameters | `best`, final `population`, `history`, `options`, `stats` |
@@ -33,8 +33,10 @@ unexpected exceptions fail explicitly rather than becoming invented penalties.
 
 Defaults: population 12, offspring 8, tournament 3, crossover probability 0.8,
 swap mutation probability 0.2, next population 12, generations 5, seed 1,
-normalized positional distance threshold 0.2, initialization attempt limit
-10,000. Change these with an override struct; no simulator config is edited.
+initialization attempt limit 10,000. Selection now uses eliteCount=6,
+qualityPoolSize=18 and makespanToleranceLevels=[0.02 0.05 0.10]. The retained
+minPositionDistance=0.2 option is legacy and is not read by the selector.
+Change options with an override struct; no simulator config is edited.
 The run owns an `mt19937ar` RandStream and never sets the global RNG. An
 injected evaluator is responsible for its own random-state side effects.
 
@@ -69,13 +71,25 @@ CustomerCompletionMakespan are normalized to NaN and never compared as
 completion objectives; original failureReason and deadlock flag are kept.
 
 Merge parents, offspring and the historical elite, rank and de-duplicate by
-key. Keep the best. Scan the remaining candidates best-first, accepting one
-only when its fraction of unequal GS positions against **every** selected
-candidate is at least the configured threshold. Fill remaining places by
-rank, ignoring the threshold but never uniqueness. Re-sort the selected
-population by the same total order. Thus diversity cannot discard the best,
-and the 12 unique parents guarantee a fillable union. Threshold 0 disables
-the distance gate. Fitness/key ties and diversity are deterministic.
+key. Protect the first min(6,count) individuals. When feasible candidates
+suffice, take the remaining diversity candidates from the top 18 quality ranks,
+first within 2% of the best feasible SystemMakespan, then 5%, then 10%.
+Within each band greedily maximize distance to the nearest selected GS,
+recomputing after every addition; equal distances use original quality rank.
+The distance is the fraction of unequal positions, not a rejection threshold.
+Fill unfilled positions by quality without the pool/band restriction.
+
+When feasible candidates are fewer than count, retain all feasible candidates
+and fill failures strictly by the existing ranking. Return actual available
+individuals with insufficientCandidates diagnostics when unique candidates
+are too few. Zero best time admits only zero-time individuals in bands;
+feasible NaN/Inf/negative makespans fail explicitly. No feasible candidate
+means rank-only failure selection. The algorithm passes its historical best
+key; absence is an error. Direct callers omitting it receive an explicit
+unverified-contract diagnostic. The merged rank-1 individual is always
+protected; an old incumbent can be superseded by better merged candidates.
+Full mapping validation remains at the evaluator; selection additionally
+checks consistent GS lengths/multiplicities. It evaluates no new candidate.
 
 ## Cache and statistics
 

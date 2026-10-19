@@ -49,7 +49,7 @@ for generation=1:options.maxGenerations
  [localBest,local]=gaFirstImprovement(start,mapping,evaluate,getStats,options.localSearchEvaluations);
  if local.improved, merged(end+1)=localBest; end
  count=min(options.populationSize,numel(unique(string({merged.key}))));
- [population,~]=gaSelectPopulation(merged,count,options.minPositionDistance);
+ [population,~]=gaSelectPopulation(merged,count,options,best.key);
  best=population(1);
  if gaIsStrictlyBetter(best,oldBest), stall=0; else, stall=stall+1; end
  after=getStats(); budget=getBudget();

@@ -1,7 +1,7 @@
 # AGV Task Scheduling MATLAB Simulator
 
 ## 1. Project Goal
-在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前已完成 GS/TS 编码、遗传算法主体、首次改进局部搜索及全局评价预算控制，尚未接入正式实验入口。
+在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前已完成 GS/TS 编码、遗传算法主体、首次改进局部搜索及全局评价预算控制，已新增独立实验入口并用于小预算联调，尚未执行完整正式优化。
 
 ## 2. Original System
 原系统 C# + ProfControl 负责真实 GoTo 和底层导航。MATLAB 是独立调度仿真器，导航可达不等于真实车辆 GoTo 可行性。
@@ -296,11 +296,11 @@ run('tests/runTests.m');  % 既有完整回归
 
 MATLAB R2022a 验证：固定种子的三代模拟运行生成 36 个候选，唯一评价 22 次、缓存命中 14 次，两次完整运行结果精确一致；关闭交叉和变异的两代测试为 12 次唯一评价、16 次命中。独立测试覆盖重复标签交叉、变异计数、非法前驱拒绝、去重、排序并列、多样性补齐、精英保留和缓存统计。真实适配器在 A06 FINALIZE 场景中与直接仿真的投影字段逐字段 `isequaln` 一致；阶段 1 和完整回归通过，A01–A08 全部通过。这些结果验证算法逻辑，不代表真实调度优化收益。
 
-接口明细见 [algorithms/GS_GENETIC_ALGORITHM.md](algorithms/GS_GENETIC_ALGORITHM.md)。阶段 3 已补充局部搜索、评价预算和停滞停止，见下节；main.m 集成和正式算法对照实验仍未实施。
+接口明细见 [algorithms/GS_GENETIC_ALGORITHM.md](algorithms/GS_GENETIC_ALGORITHM.md)。阶段 3 已补充局部搜索、评价预算和停滞停止，见下节；main.m 保持 FCFS；阶段 4A 已新增独立实验入口，正式算法对照实验仍未实施。
 
 ### 首次改进与预算控制（Memetic 阶段 3）
 
-沿用 `runGSGeneticAlgorithm`，每代从已评价父子代的合并集合选最优个体，调用 `gaFirstImprovement`。邻域按 `(1,2)、(1,3)…(N-1,N)` 固定顺序交换任意两个位置，同标签直接跳过，静态约束不合法的候选跳过。用原 `gaRankCandidates` 的完整排序（含规范键并列规则）判断严格改善，首次改善即接受并结束；否则保留起点。精英保留和多样性筛选继续复用阶段 2。
+沿用 `runGSGeneticAlgorithm`，每代从已评价父子代的合并集合选最优个体，调用 `gaFirstImprovement`。邻域按 `(1,2)、(1,3)…(N-1,N)` 固定顺序交换任意两个位置，同标签直接跳过，静态约束不合法的候选跳过。用原优化指标顺序判断严格改善（规范键仅用于排序，不构成改善），首次改善即接受并结束；否则保留起点。精英保留和多样性筛选继续复用阶段 2。
 
 参数仍集中于 `gaOptions`：`maxUniqueEvaluations=100`、`localSearchEvaluations=3`、`enableStallStop=true`、`stallGenerations=4`。所有评价共享同一个 `gaCreateEvaluator` 缓存和计数器；缓存未命中时，在调用评价函数之前检查并预占预算。初始化、子代和局部搜索共同消耗唯一评价预算，命中不消耗。局部搜索每代最多新增 3 次唯一评价，用完额度后仍可接受后续缓存邻居的改善。MATLAB 异常向外抛出，不伪装成不可行调度。
 
@@ -314,6 +314,12 @@ testGSMemeticAlgorithm; % 合成映射和模拟评价器，含 100/1/0 预算边
 ```
 
 阶段 3 模拟测试以固定种子在第 29 代恰好达到 100 次唯一评价、累计 549 次缓存命中，正常以 `budgetExhausted` 返回；重复运行精确一致且不改变全局 RNG。阶段 1/2 测试和短 A06 适配检查通过，完整回归及 A01–A08 通过。未运行 demo50 完整优化、正式 FCFS 对照或阶段 4 实验。
+
+### 真实仿真接入（阶段 4A）
+
+新增独立入口 `runGSMemeticExperiment(overrides,outputDirectory)`，复用原始 FCFS、GS 模块、`gaEvaluateSimulation` 和 `simulateSchedule`，加载相同 demo50 输入、地图及 AGV 配置。默认仅 3 次唯一 GS 评价、最多 2 代，不修改正式参数。搜索不导出文件；结束后对最优 TS 额外复算一次，要求缓存指标逐字段 `isequaln` 一致。规范键仍用于确定性排序，但不同 GS 的全部优化指标相同时，不再视为严格改善。
+
+真实小预算联调请在独立 MATLAB 进程中单独运行 `addpath('tests'); smokeGSExperiment`，不要并入混合测试进程。正式输出由可选的 `exportGSMemeticExperiment` 在搜索结束后处理，必须使用新目录，不覆盖现有 FCFS 文件，并复用原有事件/搬运记录、HTML/GIF 和绘图功能。完整说明见 [algorithms/GS_EXPERIMENT.md](algorithms/GS_EXPERIMENT.md)。本阶段不执行 100 次正式优化或形成论文实验结论。
 
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。

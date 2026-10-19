@@ -20,9 +20,9 @@ There is no formal algorithm comparison or demo50 optimization experiment.
   uses the **same** evaluator/stats handles as the genetic loop. start must
   be an already evaluated candidate. maxNew is an integer 0..3; 0 disables
   local search. It returns start unchanged unless it finds strict improvement.
-- `gaIsStrictlyBetter(candidate,reference)` delegates to gaRankCandidates,
-  including its deterministic canonical-key tie-break; identical keys are
-  never considered improvements. There is no separate local-search objective.
+- `gaIsStrictlyBetter(candidate,reference)` reuses gaRankCandidates with keys
+  neutralized for improvement checks. Canonical keys still order tied members
+  deterministically, but never turn equal objectives into strict improvement.
 - `gaInitializePopulation(...,allowPartial)` adds an optional fourth argument
   and third output complete. The original three-input behavior still rejects
   insufficient spaces. The integrated loop requests a bounded partial result
@@ -43,9 +43,9 @@ validateGS; a static cross-lane precedence violation is skipped without repair.
 Unexpected exceptions propagate.
 
 Stop at the first candidate strictly better than the fixed start under the
-unchanged stage-2 total order. Otherwise retain start. The canonical key is
-the final tie-break in that order, so equal scheduling metrics can still
-improve deterministically by key. Each call permits at most three new unique
+stage-2 objective order. Otherwise retain start. Canonical keys only break
+sorting ties; equal scheduling objectives are not strict improvement (corrected
+in stage 4A). Each call permits at most three new unique
 evaluations, measured as the shared counter delta. After using that allowance,
 continue the finite traversal with allowNew=false: later cached improvements
 can still be accepted. Global exhaustion similarly prevents new calls while

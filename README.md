@@ -1,7 +1,7 @@
 # AGV Task Scheduling MATLAB Simulator
 
 ## 1. Project Goal
-在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前已完成 GS/TS 编码、遗传算法主体、首次改进局部搜索及全局评价预算控制，已新增独立实验入口并用于小预算联调，尚未执行完整正式优化。
+在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 是 FCFS 与 GS-Memetic 正式对比实验的唯一手动入口。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前已完成 GS/TS 编码、遗传算法主体、首次改进局部搜索及全局评价预算控制，已完成小预算联调并将正式参数集成到 main.m；完整正式优化尚待用户运行验证。
 
 ## 2. Original System
 原系统 C# + ProfControl 负责真实 GoTo 和底层导航。MATLAB 是独立调度仿真器，导航可达不等于真实车辆 GoTo 可行性。
@@ -296,7 +296,7 @@ run('tests/runTests.m');  % 既有完整回归
 
 MATLAB R2022a 验证：固定种子的三代模拟运行生成 36 个候选，唯一评价 22 次、缓存命中 14 次，两次完整运行结果精确一致；关闭交叉和变异的两代测试为 12 次唯一评价、16 次命中。独立测试覆盖重复标签交叉、变异计数、非法前驱拒绝、去重、排序并列、多样性补齐、精英保留和缓存统计。真实适配器在 A06 FINALIZE 场景中与直接仿真的投影字段逐字段 `isequaln` 一致；阶段 1 和完整回归通过，A01–A08 全部通过。这些结果验证算法逻辑，不代表真实调度优化收益。
 
-接口明细见 [algorithms/GS_GENETIC_ALGORITHM.md](algorithms/GS_GENETIC_ALGORITHM.md)。阶段 3 已补充局部搜索、评价预算和停滞停止，见下节；main.m 保持 FCFS；阶段 4A 已新增独立实验入口，正式算法对照实验仍未实施。
+接口明细见 [algorithms/GS_GENETIC_ALGORITHM.md](algorithms/GS_GENETIC_ALGORITHM.md)。阶段 3 已补充局部搜索、评价预算和停滞停止，见下节；阶段 4A 已完成独立小预算联调，阶段 4B 将正式调用集成到 main.m，尚未运行完整正式实验。
 
 ### 首次改进与预算控制（Memetic 阶段 3）
 
@@ -321,6 +321,14 @@ testGSMemeticAlgorithm; % 合成映射和模拟评价器，含 100/1/0 预算边
 
 真实小预算联调请在独立 MATLAB 进程中单独运行 `addpath('tests'); smokeGSExperiment`，不要并入混合测试进程。正式输出由可选的 `exportGSMemeticExperiment` 在搜索结束后处理，必须使用新目录，不覆盖现有 FCFS 文件，并复用原有事件/搬运记录、HTML/GIF 和绘图功能。完整说明见 [algorithms/GS_EXPERIMENT.md](algorithms/GS_EXPERIMENT.md)。本阶段不执行 100 次正式优化或形成论文实验结论。
 
+### main 正式入口（阶段 4B，仅准备代码）
+
+在 MATLAB R2022a 打开 `main.m` 点击 Run，程序会通过现有 `runGSMemeticExperiment` 顺序执行一次原始 FCFS、一次 GS 搜索、一次最优 TS 复算。main 不重复调用 FCFS 或仿真器。顶部参数为种群 12、子代 8、锦标赛 3、交叉 0.8、交换变异 0.2、首次改进每代最多 3 次新评价、全局唯一评价上限 100、种子 42、停滞停止关闭、最大代数 100；算法默认参数不变。
+
+初始化完成（第 0 代）及每代完成后显示代数、唯一评价使用量、缓存命中、全局最优 SystemMakespan 和可行性。搜索期间不写正式文件；最优缓存指标逐字段精确复算通过后，才向新的独立目录导出。总距离同时显示地图单位与按实际 cfg.meterPerUnit 换算的米；不可行/死锁状态保留，不能计算改善率时显示不可用。
+
+本轮只做静态接口及 Git diff 检查，未启动 MATLAB、未执行 main、仿真、优化、导出或回归测试；正式运行及输出效果待用户验证。文件清单和调用说明见 [algorithms/GS_EXPERIMENT.md](algorithms/GS_EXPERIMENT.md)。
+
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。
 
@@ -336,7 +344,7 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 输入无效（货物缺失、重复、目标非 Slot 等）在 main 启动报明确错误；优化评估内的无效方案返回 penalty 和 failureReason。
 
 ## 11. MATLAB Project Structure
-- main.m：读取手动输入、验证、仅运行原始 FCFS、输出。try/catch 保证失败时关闭 diary。
+- main.m：唯一手动正式入口，配置参数并调用 runGSMemeticExperiment；复算一致后统一导出到新目录，异常直接报告。
 - config.m：物理、车辆、输入路径、种子、日志/绘图输出配置。
 - data/loadSimulationData.m：读取真实原始导出。
 - data/buildDistanceMatrix.m：唯一站点映射与完整有向距离矩阵。
@@ -369,9 +377,9 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 cd('C:/Users/huhan/Desktop/AGV_Simulation')
 main
 ~~~
-resultFCFS 保存 makespan、距离、时间、车辆分配、taskStatus、constraints、prioritySequence、finalSequence、taskTable、eventLog、finalSlotState、finalCargoState、agvs。
+experiment.resultFCFS / experiment.bestResult 保存 makespan、距离、时间、车辆分配、taskStatus、constraints、prioritySequence、finalSequence、taskTable、eventLog、finalSlotState、finalCargoState、agvs。
 result.assignedAGV 是内部车索引，assignedAGVID 是实际车号。
-results 中 FCFS 输出 *_tasks.csv、*_events.csv、*_slots.csv、*_cargo.csv、*_status.txt；可行时生成 *_gantt.png、*_utilization.png；保存 simulation_results.mat、precedence_constraints.csv、run_log.txt。每次覆盖同名输出，旧图可能来自上次可行运行，判断本次请先看 *_status.txt。results 不提交 Git。
+每次 main 运行输出到新的 results/gs_memetic_<时间戳>_<唯一标识>/，不会覆盖已有文件。两组方案使用 fcfs、gs_memetic 前缀导出任务、事件、搬运、最终库存、FINALIZE 和状态；另存 comparison.csv、best_gs.csv、best_ts.csv、convergence.csv、search_history.csv、precedence_constraints.csv、run_log.txt 和 experiment.mat。HTML、甘特图、利用率和收敛图遵守输出开关；甘特图和利用率只为可行方案生成。results 不提交 Git。
 ~~~matlab
 run('tests/runTests.m')
 ~~~
@@ -396,7 +404,7 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 ### 任务时序动画
 
-运行 `main` 后，`results/fcfs_animation.html` 可直接用浏览器离线打开。通过 `config.m` 的 `enableAnimation` 开关导出，`animationSpeed` 设置每秒播放推进的仿真秒数（默认 5）。支持播放/暂停、倍速、拖动时间、回到开始和下一事件，包含站点、AGV、全部初始货物、装卸进度、同步时间轴及任务明细。
+运行 `main` 后，新实验目录中的 `fcfs_animation.html` 和 `gs_memetic_animation.html` 可直接用浏览器离线打开。通过 `config.m` 的 `enableAnimation` 开关导出，`animationSpeed` 设置每秒播放推进的仿真秒数（默认 5）。支持播放/暂停、倍速、拖动时间、回到开始和下一事件，包含站点、AGV、全部初始货物、装卸进度、同步时间轴及任务明细。
 
 站点按巷道分组，站点间连线仅表示任务运输关系；车辆在连线上按真实任务阶段时长插值移动，不表示实际导航路径或真实比例。货物在 Pickup 完成时离开源站，在 Dropoff 完成时进入目标站，与仿真库存事件一致。未参与任务的货物也会显示。受阻方案显示原因且仅回放已派单工作，不使用 penalty makespan 作为动画时长，不伪造任务完成。
 
@@ -404,7 +412,7 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 ### PPT 用 GIF 动图
 
-启用 `enableAnimationGIF` 后，`main` 生成 `results/fcfs_animation.gif`。在 PowerPoint 中选择“插入 → 图片 → 此设备”，选择 GIF，进入幻灯片放映即可播放。GIF 是循环播放的固定动画，不包含 HTML 播放控件。
+启用 `enableAnimationGIF` 后，`main` 在新实验目录生成 `fcfs_animation.gif` 和 `gs_memetic_animation.gif`。在 PowerPoint 中选择“插入 → 图片 → 此设备”，选择 GIF，进入幻灯片放映即可播放。GIF 是循环播放的固定动画，不包含 HTML 播放控件。
 
 配置集中在 `config.m`：`enableAnimationGIF` 控制导出；`gifResolution=[1920 1080]` 设置尺寸；`gifFPS=8` 设置帧率；`gifMaxDuration=20` 限制运动播放时长，较长的排程会整体加速，任务并行与先后关系保持不变。默认按 `animationSpeed` 播放，开头停留约 1 秒，结尾停留约 2 秒。`gifShowAllStations=true` 默认显示全部巷道货位与库存，车辆配色与浏览器一致，并使用小车图标、车辆状态卡和同步时间轴；设为 `false` 可聚焦任务起终点和车辆初始站点。
 

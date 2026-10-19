@@ -1,11 +1,58 @@
-# Stage 4A: real-simulation entry and small-budget smoke
+# GS-Memetic experiments: main integration and stage-4A smoke
 
-`runGSMemeticExperiment(overrides,outputDirectory)` is independent of main.m.
+`main.m` is the single manual formal-experiment entry (stage 4B).
+It delegates to the reusable service
+`runGSMemeticExperiment(overrides,outputDirectory,progressFcn)`.
 It loads config() and the same read-only data/inputs as main, validates them,
 runs `fcfsSequence(tasks)` through simulateSchedule without precedence repair,
 builds GS mapping with cfg.businessEdges if present, and injects
 `@(ts)gaEvaluateSimulation(ts,tasks,data,cfg)` into runGSGeneticAlgorithm.
 Both algorithms and the best replay receive the identical tasks/data/cfg.
+
+## Stage 4B: open main.m and click Run
+
+The parameter block passes populationSize=12, offspringCount=8,
+tournamentSize=3, crossoverProbability=0.8, mutationProbability=0.2,
+localSearchEvaluations=3 (existing first improvement), maxUniqueEvaluations=100,
+seed=42, enableStallStop=false, stallGenerations=4 and maxGenerations=100.
+Algorithm defaults are unchanged. Budget 100 is an upper bound, not a promise
+to consume all evaluations: the existing space/novelty and generation limits
+still apply. FCFS and best replay are outside the search evaluation budget.
+
+main calls the service once, with an empty export path. The service runs FCFS
+once, searches once and replays the best once. main displays the complete
+comparison, then exports once after replayExact is asserted. No simulation
+or algorithm is reimplemented in main, and no second baseline is launched.
+
+Optional progressFcn is forwarded as the fourth argument of
+runGSGeneticAlgorithm. It receives (historyRow,options) after generation 0
+and each completed generation. printGSMemeticProgress only prints generation,
+unique count / configured budget, cache hits, best SystemMakespan and feasibility.
+Existing callers omitting the observer retain the same behavior and defaults.
+The observer is not stored in algorithm options/results, and errors propagate.
+
+Exports go to a new `results/gs_memetic_<timestamp>_<unique-token>/`.
+The directory is created only after search/replay. Existing paths are rejected.
+comparison.csv retains totalDistance in map units and adds
+TotalDistanceMapUnits, TotalDistanceMeters and MetersPerMapUnit from cfg.
+Additional empty/loaded/exit/home distances remain map units. Infeasible
+completion metrics are NaN, and improvement percentages remain unavailable
+unless both candidates are feasible with positive FCFS makespan.
+
+Files prepared: comparison.csv, convergence.csv, search_history.csv,
+best_gs.csv, best_ts.csv, precedence_constraints.csv, run_log.txt and
+experiment.mat. Per-solution fcfs/gs_memetic prefixes produce tasks, events,
+slots, cargo, moves, finalize CSVs and status text. Current enableAnimation
+and enablePlots settings produce HTML playback, convergence.png and feasible
+solutions' Gantt/utilization PNGs. GIF is optional under enableAnimationGIF.
+Existing exporters/renderers are reused; the search observer writes no files.
+Full options, stop reason, raw history and all results remain in experiment.mat.
+
+Stage 4B was prepared using static checks only: no MATLAB execution, main run,
+simulation, optimization, exporter invocation or regression execution. The
+formal run, callback rendering, CSV/MAT exports and plots await user validation.
+
+## Stage-4A API defaults and smoke (retained)
 
 Safe invocation defaults are 3 unique GS evaluations and at most 2 generations.
 These are local call overrides; gaOptions and config defaults are unchanged.

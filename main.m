@@ -1,58 +1,52 @@
-% Function: main
-% Purpose: Read manual cargo/tasks, run original FCFS, and export results.
-% Inputs: Edit config.m and the two input CSVs.
-% Outputs: Workspace results, tables, logs, and charts.
-%
-% Notes: Never generates or overwrites input configurations.
+% MAIN: Manual demo50 FCFS versus GS-Memetic experiment (MATLAB R2022a).
+% Read-only inputs; all formal exports go to a new independent run directory.
 clear; clc; close all;
+
+% Formal experiment parameters (call overrides; algorithm defaults unchanged).
+experimentOptions=struct( ...
+ 'populationSize',12, ...
+ 'offspringCount',8, ...
+ 'tournamentSize',3, ...
+ 'crossoverProbability',0.8, ...
+ 'mutationProbability',0.2, ...
+ 'localSearchEvaluations',3, ... % Existing first-improvement swap search.
+ 'maxUniqueEvaluations',100, ...
+ 'seed',42, ...
+ 'enableStallStop',false, ...
+ 'stallGenerations',4, ...
+ 'maxGenerations',100);
+
 projectRoot=fileparts(mfilename('fullpath'));
-addpath(projectRoot,fullfile(projectRoot,'data'),fullfile(projectRoot,'simulator'),fullfile(projectRoot,'algorithms'),fullfile(projectRoot,'tasks'),fullfile(projectRoot,'visualization'));
+addpath(projectRoot,fullfile(projectRoot,'data'),fullfile(projectRoot,'simulator'), ...
+ fullfile(projectRoot,'algorithms'),fullfile(projectRoot,'tasks'),fullfile(projectRoot,'visualization'));
 cfg=config();
-if ~isfolder(cfg.resultsDir), mkdir(cfg.resultsDir); end
-diary(fullfile(cfg.resultsDir,'run_log.txt'));
+[~,runToken]=fileparts(tempname); % Unique name only; no files created here.
+outputDirectory=fullfile(cfg.resultsDir,['gs_memetic_' datestr(now,'yyyymmdd_HHMMSS') '_' runToken]);
 try
- data=loadSimulationData(cfg); dataReport=validateInputData(data);
- [tasks,cargoInitial]=loadTaskConfiguration(data,cfg);
- data.cargoInitial=cargoInitial; validateInputData(data,tasks,cfg);
- constraints=buildTargetConstraints(tasks,data.lanes);
- fprintf('Unique stations: %d; pockets: %d; Slots: %d; cargos: %d; tasks: %d; precedence edges: %d\n',dataReport.uniqueStations,dataReport.pockets,height(cargoInitial),sum(cargoInitial.CargoID~=""),height(tasks),size(constraints,1));
- fprintf('NaN distances: %d; isolated stations: ',dataReport.nanCount); fprintf('%g ',dataReport.isolatedStations); fprintf('\n');
- seqFCFS=fcfsSequence(tasks);
- resultFCFS=simulateSchedule(seqFCFS,tasks,data,cfg);
- results={resultFCFS}; labels={'FCFS'};
- if cfg.verbose, printSimulationSummary(results,labels,tasks,cfg); end
- for k=1:numel(results)
-  r=results{k}; prefix=lower(labels{k});
-  if isfield(r,'taskTable')
-   writetable(r.taskTable,fullfile(cfg.resultsDir,[prefix '_tasks.csv']));
-   writetable(r.eventLog,fullfile(cfg.resultsDir,[prefix '_events.csv']));
-   writetable(r.finalSlotState,fullfile(cfg.resultsDir,[prefix '_slots.csv']));
-   writetable(r.finalCargoState,fullfile(cfg.resultsDir,[prefix '_cargo.csv']));
-   if isfield(r,'moveTable'), writetable(r.moveTable,fullfile(cfg.resultsDir,[prefix '_moves.csv'])); end
-   if isfield(r,'finalizeLog'), writetable(r.finalizeLog,fullfile(cfg.resultsDir,[prefix '_finalize.csv'])); end
-  end
-  fid=fopen(fullfile(cfg.resultsDir,[prefix '_status.txt']),'w');
-  assert(fid>=0,'AGV:OutputFile','Cannot write result status.');
-  fprintf(fid,'Feasible=%d\nMakespan=%.6f\n%s\n',r.isFeasible,r.makespan,r.failureReason);
-  fprintf(fid,'SystemMakespan=%.6f\nCustomerCompletionMakespan=%.6f\nFinalizeCount=%d\n', ...
-   r.SystemMakespan,r.CustomerCompletionMakespan,r.FinalizeCount);
-  fprintf(fid,'MoveCount=%d\nTotalDistance=%.6f\nExitDistance=%.6f\nReturnHomeDistance=%.6f\nDistanceUnit=MapUnit\n', ...
-   r.TotalMoveCount,r.totalDistance,r.ExitDistance,r.ReturnHomeDistance); fclose(fid);
-  if cfg.enableAnimation && isfield(r,'taskTable')
-   exportScheduleAnimation(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.html']));
-  end
-  if cfg.enableAnimationGIF && isfield(r,'taskTable')
-   exportScheduleGIF(r,tasks,data,cfg,labels{k},fullfile(cfg.resultsDir,[prefix '_animation.gif']));
-  end
-  if cfg.enablePlots && r.isFeasible
-   f=plotGanttChart(r,tasks,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_gantt.png']));
-   f=plotAGVUtilization(r,cfg,labels{k}); saveas(f,fullfile(cfg.resultsDir,[prefix '_utilization.png']));
-  end
+ fprintf('Running original FCFS, then GS-Memetic (seed=%d, unique budget=%d).\n', ...
+  experimentOptions.seed,experimentOptions.maxUniqueEvaluations);
+ fprintf('Post-replay output directory: %s\n',outputDirectory);
+ % This function owns the ONE FCFS run, ONE search and ONE best-TS replay.
+ % No export during search; every cached best metric is checked by isequaln.
+ experiment=runGSMemeticExperiment(experimentOptions,"",@printGSMemeticProgress);
+ experiment.outputDirectory=string(outputDirectory);
+ fprintf('\nFCFS versus GS-Memetic (times: seconds; totalDistance: map units).\n');
+ fprintf('TotalDistanceMeters = TotalDistanceMapUnits * %.12g m/map unit.\n',experiment.cfg.meterPerUnit);
+ disp(experiment.comparison);
+ fprintf('Best GS: '); fprintf('%s ',experiment.search.best.gs); fprintf('\nBest TS (task rows): ');
+ fprintf('%d ',experiment.search.best.ts); fprintf('\n');
+ fprintf('Stop=%s; unique=%d/%d; cache hits=%d; replay exact=%d.\n', ...
+  experiment.search.stopReason,experiment.search.stats.uniqueEvaluationCount, ...
+  experiment.search.options.maxUniqueEvaluations,experiment.search.stats.cacheHitCount,experiment.replayExact);
+ if isfinite(experiment.SystemMakespanImprovementPercent)
+  fprintf('SystemMakespan reduction versus FCFS: %.6f%%\n',experiment.SystemMakespanImprovementPercent);
+ else
+  fprintf('SystemMakespan reduction unavailable: both results must be feasible with a positive FCFS makespan.\n');
  end
- writematrix(constraints,fullfile(cfg.resultsDir,'precedence_constraints.csv'));
- save(fullfile(cfg.resultsDir,'simulation_results.mat'),'cfg','dataReport','cargoInitial','tasks','constraints','seqFCFS','resultFCFS');
+ assert(experiment.replayExact,'AGV:ExperimentReplay','Export requires exact best replay.');
+ exportGSMemeticExperiment(experiment,outputDirectory);
+ fprintf('Formal results saved to: %s\n',outputDirectory);
 catch err
- diary off;
+ fprintf(2,'%s\n',getReport(err,'extended','hyperlinks','off'));
  rethrow(err);
 end
-diary off;

@@ -1,11 +1,14 @@
-function experiment = runGSMemeticExperiment(overrides,outputDirectory)
-%RUNGSMEMETICEXPERIMENT Independent entry; safe default is three real GS calls.
+function experiment = runGSMemeticExperiment(overrides,outputDirectory,progressFcn)
+%RUNGSMEMETICEXPERIMENT Reusable service; main supplies formal call overrides.
+% Direct API calls retain the stage-4A safe three-evaluation default.
 % No files are exported unless a NEW outputDirectory is explicitly supplied.
 root=fileparts(mfilename('fullpath'));
 addpath(root,fullfile(root,'data'),fullfile(root,'tasks'),fullfile(root,'simulator'), ...
  fullfile(root,'algorithms'),fullfile(root,'visualization'));
 if nargin<1, overrides=struct(); end
 if nargin<2, outputDirectory=""; end
+if nargin<3, progressFcn=[]; end
+assert(isempty(progressFcn) || isa(progressFcn,'function_handle'),'AGV:GAProgress','Expected a progress observer.');
 assert(isstruct(overrides) && isscalar(overrides),'AGV:Experiment','Overrides must be a scalar struct.');
 outputDirectory=string(outputDirectory);
 assert(isscalar(outputDirectory) && ~ismissing(outputDirectory),'AGV:ExperimentOutput','Expected one output directory.');
@@ -24,7 +27,7 @@ mapping=buildGSMapping(tasks,data.lanes,business);
 seqFCFS=fcfsSequence(tasks); % Original row order, no precedence repair/encoding.
 resultFCFS=simulateSchedule(seqFCFS,tasks,data,cfg);
 evaluations=struct('key',{},'ts',{},'evaluation',{});
-search=runGSGeneticAlgorithm(mapping,@evaluate,overrides);
+search=runGSGeneticAlgorithm(mapping,@evaluate,overrides,progressFcn);
 assert(search.stats.uniqueEvaluationCount==numel(evaluations),'AGV:Experiment','Evaluator count mismatch.');
 assert(numel(unique(string({evaluations.key})))==numel(evaluations),'AGV:Experiment','A unique evaluation was repeated.');
 assert(isequal(decodeGS(search.best.gs,mapping),search.best.ts),'AGV:Experiment','Best GS/TS mismatch.');
@@ -42,6 +45,14 @@ baseline=project(resultFCFS);
 for k=1:numel(names)
  name=names{k}; comparison.(name)=[baseline.(name);replay.(name)];
 end
+% Preserve totalDistance in map units and add explicitly labelled units.
+comparison.TotalDistanceMapUnits=comparison.totalDistance;
+comparison.TotalDistanceMeters=comparison.totalDistance*cfg.meterPerUnit;
+comparison.MetersPerMapUnit=repmat(cfg.meterPerUnit,2,1);
+for name={'emptyDistance','loadedDistance','CustomerMoveCount','FinalizeCount','ExitDistance','ReturnHomeDistance'}
+ comparison.(name{1})=[resultFCFS.(name{1});bestResult.(name{1})];
+end
+comparison.CompletedCustomerCount=[baseline.CompletedCustomerCount;replay.CompletedCustomerCount];
 improvement=NaN;
 if baseline.isFeasible && replay.isFeasible && baseline.SystemMakespan>0
  improvement=100*(baseline.SystemMakespan-replay.SystemMakespan)/baseline.SystemMakespan;

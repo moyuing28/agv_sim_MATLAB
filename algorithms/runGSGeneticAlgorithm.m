@@ -1,6 +1,8 @@
-function run = runGSGeneticAlgorithm(mapping,evaluator,overrides)
+function run = runGSGeneticAlgorithm(mapping,evaluator,overrides,progressFcn)
 %RUN GSGENETICALGORITHM GS-Memetic search, one shared hard budget/cache.
 if nargin<3, overrides=struct(); end
+if nargin<4, progressFcn=[]; end
+assert(isempty(progressFcn) || isa(progressFcn,'function_handle'),'AGV:GAProgress','Progress observer must be a function handle.');
 options=gaOptions(overrides); stream=RandStream('mt19937ar','Seed',options.seed);
 [initial,attempts,complete]=gaInitializePopulation(mapping,options,stream,true);
 [evaluate,getStats,getBudget]=gaCreateEvaluator(mapping,evaluator,options.maxUniqueEvaluations);
@@ -14,6 +16,7 @@ population=population(1:evaluatedCount); % No unevaluated initial GS enters a po
 population=population(gaRankCandidates(population)); best=population(1);
 local=emptyLocal(); stall=0; noNewCount=0;
 history=record(0,population,best,getStats(),0,local,stall);
+if ~isempty(progressFcn), progressFcn(history(end),options); end
 rejectedCrossover=0; rejectedMutation=0;
 stopReason=""; budget=getBudget();
 if budget.remaining==0, stopReason="budgetExhausted";
@@ -58,6 +61,7 @@ for generation=1:options.maxGenerations
  elseif noNewCount>=options.stallGenerations, stopReason="noNewCandidates";
  end
  history(end+1)=record(generation,population,best,after,numel(offspring),local,stall); %#ok<AGROW>
+ if ~isempty(progressFcn), progressFcn(history(end),options); end
 end
 if strlength(stopReason)==0, stopReason="maxGenerations"; end
 history(end).stopReason=stopReason;

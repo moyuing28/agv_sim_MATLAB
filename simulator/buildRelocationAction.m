@@ -16,14 +16,14 @@ fresh=assessCustomerTask(parentTask,data,state);
 if ~sameRequest(assessment,fresh,side)
  action.Reason="Stale assessment"; return;
 end
-candidates=getRelocationCandidateLanes(cargoID,parentTask,kind,state,data);
+candidates=getRelocationCandidateLanes(cargoID,parentTask,kind,state,data,true);
 selected=selectRelocationLaneBaseline(candidates);
 if isempty(selected)
  action.Reason="No feasible relocation target lane"; return;
 end
 % The candidate table above was generated from this snapshot; it re-runs
-% getRelocationSource, access-reservation and trial No-hole validation for
-% every candidate. No input changes between that enumeration and this point,
+% getRelocationSource and access-reservation checks, and full trial No-hole
+% validation for the selected candidate. No input changes before this point,
 % so regenerating the same set could only reproduce it.
 action.TargetStation=selected.DropStation; action.TargetPocketKey=selected.PocketKey;
 action.TargetPocketName=selected.PocketName; action.TargetSequence=selected.DropSequence;

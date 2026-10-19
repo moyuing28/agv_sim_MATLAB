@@ -1,6 +1,8 @@
-function candidates = getRelocationCandidateLanes(cargoID,parentTask,kind,state,data)
+function candidates = getRelocationCandidateLanes(cargoID,parentTask,kind,state,data,nearestOnly)
 %GETRELOCATIONCANDIDATELANES All immediately legal cross-Lane destinations.
 % RemainingCapacity is free Slot count AFTER this hypothetical deposit.
+% Default callers retain the complete candidate table in PocketKey order.
+if nargin<6, nearestOnly=false; end
 assert(ismember(kind,["SOURCE_CLEARING","TARGET_CLEARING","TERMINAL_PROTECTION","SELF_TEMPORARY"]), ...
  'AGV:RelocationKind','Unsupported RelocationKind.');
 source=getRelocationSource(cargoID,state,data);
@@ -19,8 +21,8 @@ sourceAccess=[sourceStation;getSlotAccessStations(sourceStation,data)];
 [found,idx]=ismember(sourceAccess,state.slotMarks);
 assert(all(found),'AGV:SlotState','Missing source access Slot.');
 if any(state.reservedBy(idx)~=0), return; end
-% Columns remain local to this read-only enumeration; every candidate is
-% still checked independently, including its full hypothetical inventory.
+% Enumerate live drop/access/distance information before ordering. In nearest
+% mode defer hypothetical inventories until the exact baseline order is known.
 haveNames=false;
 for key=sort(unique(slotKeys))'
  if key==sourceKey, continue; end
@@ -35,13 +37,27 @@ for key=sort(unique(slotKeys))'
  if state.occupancy(d)~="" || any(state.reservedBy(idx)~=0), continue; end
  distance=getTravelDistance(sourceStation,drop,data);
  if ~isfinite(distance) || distance<0, continue; end
- after=inventory;
- after.CargoID(inventoryMarks==sourceStation)="";
- after.CargoID(inventoryMarks==drop)=cargoID;
- validateNoHoleState(after,data.lanes);
+ if ~nearestOnly
+  after=inventory;
+  after.CargoID(inventoryMarks==sourceStation)="";
+  after.CargoID(inventoryMarks==drop)=cargoID;
+  validateNoHoleState(after,data.lanes);
+ end
  laneRows=slotKeys==key;
  remaining=sum(ismember(slotMarks(laneRows),state.slotMarks(state.occupancy=="")))-1;
  if ~haveNames, slotNames=slots.PocketName; haveNames=true; end
  candidates(end+1,:)={key,slotNames(find(laneRows,1)),drop,sequence,distance,remaining,isParent}; %#ok<AGROW>
+end
+if nearestOnly && ~isempty(candidates)
+ ordered=sortrows(candidates,{'LoadedDistance','PocketKey','DropStation'});
+ % Source is the outer cargo; each destination is the next compact Slot in
+ % a different Lane. With the initial global No-hole check, every such trial
+ % preserves compactness. Still perform the original full validation before
+ % returning the first candidate; validation errors must propagate, not skip.
+ after=inventory;
+ after.CargoID(inventoryMarks==sourceStation)="";
+ after.CargoID(inventoryMarks==ordered.DropStation(1))=cargoID;
+ validateNoHoleState(after,data.lanes);
+ candidates=ordered(1,:);
 end
 end

@@ -5,7 +5,7 @@ action=struct('ActionType',"FILLING",'ParentCustomerTaskID',parentTask.TaskID,'C
  'TargetStation',NaN,'TargetPocketKey',"",'TargetSequence',NaN, ...
  'LoadedDistance',NaN,'IsFeasible',false,'Reason',"",'CreatedFromSide',"TARGET", ...
  'RequiredFillingCountBefore',NaN);
-[candidates,reason]=getFillingCandidateSourceLanes(parentTask,assessment,state,data);
+[candidates,reason]=getFillingCandidateSourceLanes(parentTask,assessment,state,data,true);
 selected=selectFillingSourceLaneBaseline(candidates);
 % Cooperation: if the Parent's own Source blocker is an ordinary, eligible
 % Filling source, prefer it over the nearest baseline so this single FILLING
@@ -18,8 +18,8 @@ end
 if isempty(selected), action.Reason=reason; return; end
 % The candidate table above was built from this snapshot: getFillingTarget
 % already re-validated the fixed target, its access reservations and the live
-% legal drop Slot, and every row passed the live Cargo/occupancy, reservation
-% and trial No-hole checks. No input changes between that enumeration and this
+% legal drop Slot, and the winner passed the live Cargo/occupancy, reservation
+% and full trial No-hole checks. No input changes between the search and this
 % point, so regenerating the same set could only reproduce these rows.
 fresh=assessCustomerTask(parentTask,data,state);
 if fresh.TargetAction~="FILLING" || fresh.NextFillingStation~=assessment.NextFillingStation

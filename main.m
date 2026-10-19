@@ -1,5 +1,5 @@
 % Function: main
-% Purpose: Read manual cargo/tasks, compare baselines, and export results.
+% Purpose: Read manual cargo/tasks, run original FCFS, and export results.
 % Inputs: Edit config.m and the two input CSVs.
 % Outputs: Workspace results, tables, logs, and charts.
 %
@@ -7,7 +7,7 @@
 clear; clc; close all;
 projectRoot=fileparts(mfilename('fullpath'));
 addpath(projectRoot,fullfile(projectRoot,'data'),fullfile(projectRoot,'simulator'),fullfile(projectRoot,'algorithms'),fullfile(projectRoot,'tasks'),fullfile(projectRoot,'visualization'));
-cfg=config(); rng(cfg.randomSeed,'twister');
+cfg=config();
 if ~isfolder(cfg.resultsDir), mkdir(cfg.resultsDir); end
 diary(fullfile(cfg.resultsDir,'run_log.txt'));
 try
@@ -17,11 +17,11 @@ try
  constraints=buildTargetConstraints(tasks,data.lanes);
  fprintf('Unique stations: %d; pockets: %d; Slots: %d; cargos: %d; tasks: %d; precedence edges: %d\n',dataReport.uniqueStations,dataReport.pockets,height(cargoInitial),sum(cargoInitial.CargoID~=""),height(tasks),size(constraints,1));
  fprintf('NaN distances: %d; isolated stations: ',dataReport.nanCount); fprintf('%g ',dataReport.isolatedStations); fprintf('\n');
- seqFCFS=fcfsSequence(tasks); seqRandom=randomSequence(tasks);
- resultFCFS=simulateSchedule(seqFCFS,tasks,data,cfg); resultRandom=simulateSchedule(seqRandom,tasks,data,cfg);
- results={resultFCFS,resultRandom}; labels={'FCFS','Random'};
+ seqFCFS=fcfsSequence(tasks);
+ resultFCFS=simulateSchedule(seqFCFS,tasks,data,cfg);
+ results={resultFCFS}; labels={'FCFS'};
  if cfg.verbose, printSimulationSummary(results,labels,tasks,cfg); end
- for k=1:2
+ for k=1:numel(results)
   r=results{k}; prefix=lower(labels{k});
   if isfield(r,'taskTable')
    writetable(r.taskTable,fullfile(cfg.resultsDir,[prefix '_tasks.csv']));
@@ -50,7 +50,7 @@ try
   end
  end
  writematrix(constraints,fullfile(cfg.resultsDir,'precedence_constraints.csv'));
- save(fullfile(cfg.resultsDir,'simulation_results.mat'),'cfg','dataReport','cargoInitial','tasks','constraints','seqFCFS','seqRandom','resultFCFS','resultRandom');
+ save(fullfile(cfg.resultsDir,'simulation_results.mat'),'cfg','dataReport','cargoInitial','tasks','constraints','seqFCFS','resultFCFS');
 catch err
  diary off;
  rethrow(err);

@@ -1,7 +1,7 @@
 # AGV Task Scheduling MATLAB Simulator
 
 ## 1. Project Goal
-在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前提供 FCFS、Random 和未来优化算法接口。
+在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前仅完成 GS/TS 编码基础模块。
 
 ## 2. Original System
 原系统 C# + ProfControl 负责真实 GoTo 和底层导航。MATLAB 是独立调度仿真器，导航可达不等于真实车辆 GoTo 可行性。
@@ -235,7 +235,41 @@ AGV：ID、CurrentStation、AvailableTime、TotalTravelDistance、TotalBusyTime�
 
 ## 9. Objective Function and Encoding
 sequence 是任务表行索引 1:N 的完整排列，不是 CargoID、TaskID 或 StationMark。evaluateSequence 返回 makespan，第二输出完整 result；不可行方案返回 invalidCost，不伪造完成。
-prioritySequence 保留输入的 Customer 优先列表（hard eligibility 单独过滤，不重写 priority）；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。遗传编码应使用完整优先排列，不能拿失败结果的部分 finalSequence 当完整染色体。
+prioritySequence 保留输入的 Customer 优先列表（hard eligibility 单独过滤，不重写 priority）；finalSequence 为实际派单顺序，因暂时占用/阻挡，可能跳过高优先任务，或不可行时仅含已派单任务。TS 是传入仿真器的完整任务行索引优先排列；GS 是算法操作的目标 PocketKey 标签序列，不能拿失败结果的部分 finalSequence 当完整染色体。
+
+### GS/TS 编码基础（Memetic 阶段 1）
+
+GS 的每个基因是目标巷道 PocketKey，出现次数等于该巷道客户任务数。每条巷道的任务列表按目标 Sequence 升序（深到浅）固定，直接沿用 `buildTargetConstraints` 的规则。解码从左到右消费各巷道列表，返回任务行索引 TS；不依赖 TaskID 连续性，不硬编码 demo50。
+
+| 接口 | 职责 |
+|---|---|
+| `buildGSMapping(tasks,lanes,businessEdges)` | 动态构建任务行、目标标签/Sequence、巷道固定列表、标签计数和原有静态前驱边；businessEdges 可省略 |
+| `encodeTS(ts,mapping)` | 校验完整排列及全部静态前驱边，返回行字符串向量 GS |
+| `decodeGS(gs,mapping)` | 校验标签、计数和全部静态前驱边，返回任务行索引 TS |
+| `[gs,ts] = validateGS(gs,mapping)` | 明确拒绝非法输入，返回规范行向量，不自动修复 |
+| `gsCanonicalString(gs,mapping)` | 生成长度前缀规范字符串，正确区分多位数标签及标签边界 |
+
+```matlab
+addpath('data','tasks','algorithms');
+cfg = config();
+data = loadSimulationData(cfg);
+[tasks,~] = loadTaskConfiguration(data,cfg);
+mapping = buildGSMapping(tasks,data.lanes);
+% 每条巷道内按固定列表消费；该示例适用于默认无跨巷道 businessEdges 的映射。
+gs = mapping.taskPocketKey';
+ts = decodeGS(gs,mapping);
+assert(isequal(encodeTS(ts,mapping),gs));
+key = gsCanonicalString(gs,mapping);
+
+addpath('tests');
+testGSEncoding;
+```
+
+无法识别的目标 Slot、模糊巷道归属、空 PocketKey、非有限 Sequence、同巷道目标 Sequence 并列均报错。TS 必须完整且满足静态前驱关系；GS 的标签及出现次数必须准确，附加跨巷道 businessEdges 也必须满足。输入改变后应重建 mapping。原始 FCFS 不经过编码、修复或强制转换；动态 No-hole、Future Cargo protection、Relocation、Filling 和资源冲突仍由原仿真器负责。
+
+当前 demo50 从真实输入得到 10 个客户任务、9 个标签，PocketKey `90` 的固定任务行列表为 `[2,10]`，静态边为 T2→T10。仅有巷道内约束时，合法 GS 数量按 `factorial(n)/prod(factorial(mapping.counts))` 动态计算，当前为 1,814,400；额外跨巷道前驱边可能进一步减少合法数量。
+
+MATLAB R2022a 已通过独立编码测试（往返、多组合法 GS、非法输入、规范字符串及小规模排列枚举）和完整 `tests/runTests.m` 回归，A01–A08 全部通过。接口细节见 [algorithms/GS_ENCODING.md](algorithms/GS_ENCODING.md)。本阶段没有实现遗传算法、交叉、变异、局部搜索、缓存或预算控制，也未接入正式实验入口。
 
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。
@@ -252,7 +286,7 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 输入无效（货物缺失、重复、目标非 Slot 等）在 main 启动报明确错误；优化评估内的无效方案返回 penalty 和 failureReason。
 
 ## 11. MATLAB Project Structure
-- main.m：读取手动输入、验证、两基线、输出。try/catch 保证失败时关闭 diary。
+- main.m：读取手动输入、验证、仅运行原始 FCFS、输出。try/catch 保证失败时关闭 diary。
 - config.m：物理、车辆、输入路径、种子、日志/绘图输出配置。
 - data/loadSimulationData.m：读取真实原始导出。
 - data/buildDistanceMatrix.m：唯一站点映射与完整有向距离矩阵。
@@ -274,7 +308,7 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 - simulator/repairSequence.m、checkTaskFeasible.m：优先拓扑修复、固定前置检查。
 - simulator/assignAGV.m：已选 Action 的最早预计完成分车规则，调用方仅传当前空闲车辆，AGVID 并列破同。
 - simulator/getTravelDistance.m、getTravelTime.m：有向查距、时间换算。
-- algorithms/fcfsSequence.m、randomSequence.m：输入行顺序、随机完整排列。
+- algorithms/fcfsSequence.m、randomSequence.m：输入行顺序、随机完整排列；randomSequence.m 保留供独立使用，main.m 不再调用。
 - algorithms/algorithmTemplate.m：未来算法输出 bestSequence,bestFitness,history 的占位模板。
 - visualization/：甘特图、利用率、摘要；只为可行方案绘图。
 - tests/runTests.m：真实地图与临时输入，验证库存和调度，不改用户输入。
@@ -285,9 +319,9 @@ Dropoff：在载货行驶+Drop 完成时，目标占用更新，AGV 变空，释
 cd('C:/Users/huhan/Desktop/AGV_Simulation')
 main
 ~~~
-resultFCFS/resultRandom 保存 makespan、距离、时间、车辆分配、taskStatus、constraints、prioritySequence、finalSequence、taskTable、eventLog、finalSlotState、finalCargoState、agvs。
+resultFCFS 保存 makespan、距离、时间、车辆分配、taskStatus、constraints、prioritySequence、finalSequence、taskTable、eventLog、finalSlotState、finalCargoState、agvs。
 result.assignedAGV 是内部车索引，assignedAGVID 是实际车号。
-results 中每种算法输出 *_tasks.csv、*_events.csv、*_slots.csv、*_cargo.csv、*_status.txt；可行时生成 *_gantt.png、*_utilization.png；保存 simulation_results.mat、precedence_constraints.csv、run_log.txt。每次覆盖同名输出，旧图可能来自上次可行运行，判断本次请先看 *_status.txt。results 不提交 Git。
+results 中 FCFS 输出 *_tasks.csv、*_events.csv、*_slots.csv、*_cargo.csv、*_status.txt；可行时生成 *_gantt.png、*_utilization.png；保存 simulation_results.mat、precedence_constraints.csv、run_log.txt。每次覆盖同名输出，旧图可能来自上次可行运行，判断本次请先看 *_status.txt。results 不提交 Git。
 ~~~matlab
 run('tests/runTests.m')
 ~~~
@@ -312,7 +346,7 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 ### 任务时序动画
 
-运行 `main` 后，`results/fcfs_animation.html` 和 `results/random_animation.html` 可直接用浏览器离线打开。通过 `config.m` 的 `enableAnimation` 开关导出，`animationSpeed` 设置每秒播放推进的仿真秒数（默认 5）。支持播放/暂停、倍速、拖动时间、回到开始和下一事件，包含站点、AGV、全部初始货物、装卸进度、同步时间轴及任务明细。
+运行 `main` 后，`results/fcfs_animation.html` 可直接用浏览器离线打开。通过 `config.m` 的 `enableAnimation` 开关导出，`animationSpeed` 设置每秒播放推进的仿真秒数（默认 5）。支持播放/暂停、倍速、拖动时间、回到开始和下一事件，包含站点、AGV、全部初始货物、装卸进度、同步时间轴及任务明细。
 
 站点按巷道分组，站点间连线仅表示任务运输关系；车辆在连线上按真实任务阶段时长插值移动，不表示实际导航路径或真实比例。货物在 Pickup 完成时离开源站，在 Dropoff 完成时进入目标站，与仿真库存事件一致。未参与任务的货物也会显示。受阻方案显示原因且仅回放已派单工作，不使用 penalty makespan 作为动画时长，不伪造任务完成。
 
@@ -320,7 +354,7 @@ GA/GWO/SA/ACO/禁忌搜索，多目标、动态插单、联合 AGV 分配。障�
 
 ### PPT 用 GIF 动图
 
-`main` 同时生成 `results/fcfs_animation.gif` 和 `results/random_animation.gif`。在 PowerPoint 中选择“插入 → 图片 → 此设备”，选择 GIF，进入幻灯片放映即可播放。GIF 是循环播放的固定动画，不包含 HTML 播放控件。
+启用 `enableAnimationGIF` 后，`main` 生成 `results/fcfs_animation.gif`。在 PowerPoint 中选择“插入 → 图片 → 此设备”，选择 GIF，进入幻灯片放映即可播放。GIF 是循环播放的固定动画，不包含 HTML 播放控件。
 
 配置集中在 `config.m`：`enableAnimationGIF` 控制导出；`gifResolution=[1920 1080]` 设置尺寸；`gifFPS=8` 设置帧率；`gifMaxDuration=20` 限制运动播放时长，较长的排程会整体加速，任务并行与先后关系保持不变。默认按 `animationSpeed` 播放，开头停留约 1 秒，结尾停留约 2 秒。`gifShowAllStations=true` 默认显示全部巷道货位与库存，车辆配色与浏览器一致，并使用小车图标、车辆状态卡和同步时间轴；设为 `false` 可聚焦任务起终点和车辆初始站点。
 

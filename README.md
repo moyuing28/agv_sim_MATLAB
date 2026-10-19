@@ -1,7 +1,7 @@
 # AGV Task Scheduling MATLAB Simulator
 
 ## 1. Project Goal
-在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前仅完成 GS/TS 编码基础模块。
+在固定 ProfControl 有向导航距离下研究多 AGV 任务排序。运行的是货物级取放离散事件，不模拟连续轨迹、路径规划、避障、路口冲突或途中改派。当前 main.m 仅运行原始 FCFS。后续将在现有仿真器外部开发传统 Memetic Algorithm（遗传算法 + 局部搜索），优先最小化 SystemMakespan，并在相同条件下比较搬运次数和总距离；目前已完成 GS/TS 编码基础模块和独立遗传算法主体，尚未加入局部搜索或接入正式实验入口。
 
 ## 2. Original System
 原系统 C# + ProfControl 负责真实 GoTo 和底层导航。MATLAB 是独立调度仿真器，导航可达不等于真实车辆 GoTo 可行性。
@@ -269,7 +269,34 @@ testGSEncoding;
 
 当前 demo50 从真实输入得到 10 个客户任务、9 个标签，PocketKey `90` 的固定任务行列表为 `[2,10]`，静态边为 T2→T10。仅有巷道内约束时，合法 GS 数量按 `factorial(n)/prod(factorial(mapping.counts))` 动态计算，当前为 1,814,400；额外跨巷道前驱边可能进一步减少合法数量。
 
-MATLAB R2022a 已通过独立编码测试（往返、多组合法 GS、非法输入、规范字符串及小规模排列枚举）和完整 `tests/runTests.m` 回归，A01–A08 全部通过。接口细节见 [algorithms/GS_ENCODING.md](algorithms/GS_ENCODING.md)。本阶段没有实现遗传算法、交叉、变异、局部搜索、缓存或预算控制，也未接入正式实验入口。
+MATLAB R2022a 已通过独立编码测试（往返、多组合法 GS、非法输入、规范字符串及小规模排列枚举）和完整 `tests/runTests.m` 回归，A01–A08 全部通过。接口细节见 [algorithms/GS_ENCODING.md](algorithms/GS_ENCODING.md)。上述为阶段 1 的交付范围；阶段 2 已补充遗传算法、交叉、变异和运行内缓存，见下节。
+
+### 遗传算法主体（Memetic 阶段 2）
+
+阶段 2 在 GS 模块外部新增独立 GA，不改变原始 FCFS、仿真器或正式实验入口。主接口为 `runGSGeneticAlgorithm(mapping,evaluator,overrides)`，评价器接收解码后的 TS，返回候选指标；输出包含 `best`、最终 `population`、逐代 `history`、`options` 和运行 `stats`。真实适配器 `gaEvaluateSimulation(ts,tasks,data,cfg)` 直接复用 `simulateSchedule`，不导出正式结果。
+
+参数集中在 `gaOptions`：初始/下一代种群 12、每代子代 8、锦标赛规模 3、交叉概率 0.8、交换变异概率 0.2；默认代数上限 5、种子 1、位置差异阈值 0.2、初始化尝试上限 10,000，均可通过 overrides 调整。独立 RandStream 不修改全局随机状态；可注入评价器自行负责其随机副作用。
+
+- **初始化**：随机生成满足静态约束的拓扑任务排列，再编码为 GS，以规范键保证 12 个不同个体；空间上界不足或有限尝试耗尽时明确诊断，不无限循环。
+- **选择与交叉**：锦标赛无放回抽取个体，按统一规则选优。交叉保留父代 A 的连续片段，再按父代 B 顺序及剩余标签配额补齐；跳过交叉时复制 A。
+- **交换变异**：交换两个不同位置，保持标签总计数。交叉、变异后调用阶段 1 校验；违反附加跨巷道前驱边时拒绝该操作，保留操作前 GS，不自动修复。
+- **统一排序**：可行优于不可行；可行候选依次最小化 SystemMakespan、TotalMoveCount、totalDistance，最后按规范键破并列。不可行候选按真实已完成客户数降序、规范键升序排列，未知进度排在已知进度之后；真实适配器仅从 `taskStatus=="Completed"` 计算进度，不把部分时间或 invalidCost 当作完工时间。
+- **运行内缓存**：`gaCreateEvaluator` 使用 `gsCanonicalString` 作为键，命中时不重复调用评价器。分别记录送入缓存的候选数、唯一评价数和命中数，三者满足“候选数 = 唯一评价数 + 命中数”；初始化原始尝试和被拒绝的操作另计，不实现跨运行缓存。
+- **精英与多样性**：父子代合并后按键去重，强制保留最优个体；按评价顺序扫描，仅接受与所有已选 GS 的不相同位置比例均达到阈值的候选。不足 12 个时按评价顺序补齐，始终保持键唯一。阈值设为 0 可关闭距离筛选。
+
+独立测试命令（不运行真实完整优化）：
+
+```matlab
+addpath('tests');
+testGSGeneticAlgorithm;   % 模拟评价器，少量代数
+testGAEvaluationAdapter; % 短 A06 场景的真实适配器校验
+testGSEncoding;          % 阶段 1 回归
+run('tests/runTests.m');  % 既有完整回归
+```
+
+MATLAB R2022a 验证：固定种子的三代模拟运行生成 36 个候选，唯一评价 22 次、缓存命中 14 次，两次完整运行结果精确一致；关闭交叉和变异的两代测试为 12 次唯一评价、16 次命中。独立测试覆盖重复标签交叉、变异计数、非法前驱拒绝、去重、排序并列、多样性补齐、精英保留和缓存统计。真实适配器在 A06 FINALIZE 场景中与直接仿真的投影字段逐字段 `isequaln` 一致；阶段 1 和完整回归通过，A01–A08 全部通过。这些结果验证算法逻辑，不代表真实调度优化收益。
+
+接口明细见 [algorithms/GS_GENETIC_ALGORITHM.md](algorithms/GS_GENETIC_ALGORITHM.md)。尚未实现局部搜索、每代局部搜索额度、全局 100 次唯一评价硬预算、连续 4 代无改善停止、main.m 集成或正式算法对照实验。
 
 ## 10. Constraints and Event Semantics
 `buildTargetConstraints(tasks,lanes,businessEdges)` 按最终 DropoffStation 查找真实 Slot，以 PocketKey 分组、Sequence 升序排序，仅建立相邻深位→浅位任务边。Sequence=0 最深，因此更小 Sequence 的最终任务必须先完成。输出仍是任务行索引 N×2 边矩阵，保持 repairSequence、checkTaskFeasible、evaluateSequence 兼容。前置任务 Dropoff 完成后才释放后续任务。

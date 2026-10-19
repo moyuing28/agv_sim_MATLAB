@@ -29,6 +29,6 @@ cfg.gifResolution = [1920 1080]; % Full-map, 16:9 slide-friendly image size.
 cfg.gifShowAllStations = true; % Match browser replay: all lanes, slots and initial cargo.
 cfg.verbose = true;
 cfg.cargoFile = fullfile(cfg.projectRoot,'tasks','cargo_initial50.csv');
-cfg.taskFile = fullfile(cfg.projectRoot,'tasks','tasks_demo50.csv');
+cfg.taskFile = fullfile(cfg.projectRoot,'tasks','tasks_demo2.csv');
 cfg.resultsDir = fullfile(cfg.projectRoot,'results');
 end

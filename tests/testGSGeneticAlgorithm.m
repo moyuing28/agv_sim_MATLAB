@@ -81,7 +81,8 @@ end
 picked=gaSelectPopulation(diverse,2,0.75);
 assert(isequal(string({picked.key}),["1" "3"]));
 % Complete short runs, isolated RNG, reproducible history and elite survival.
-settings=struct('seed',44,'maxGenerations',3);
+% Preserve the stage-2-only regression with new optional features disabled.
+settings=struct('seed',44,'maxGenerations',3,'localSearchEvaluations',0,'enableStallStop',false);
 r=runGSGeneticAlgorithm(m,@mock,settings); again=runGSGeneticAlgorithm(m,@mock,settings);
 assert(isequaln(r,again) && isequal(rng,state));
 assert(numel(r.population)==12 && numel(unique(string({r.population.key})))==12);
@@ -94,10 +95,10 @@ for g=2:numel(r.history)
  pair(2).key=r.history(g).bestKey; pair(2).evaluation=newer;
  order=gaRankCandidates(pair); assert(order(1)==2 || previous==r.history(g).bestKey);
 end
-noOperators=runGSGeneticAlgorithm(m,@mock,struct('maxGenerations',2,'crossoverProbability',0,'mutationProbability',0));
+noOperators=runGSGeneticAlgorithm(m,@mock,struct('maxGenerations',2,'crossoverProbability',0,'mutationProbability',0,'localSearchEvaluations',0,'enableStallStop',false));
 assert(noOperators.stats.uniqueEvaluationCount==12 && noOperators.stats.cacheHitCount==16);
 single=buildGSMapping(tinyTasks(1,:),tinyLanes);
-one=runGSGeneticAlgorithm(single,@mock,struct('populationSize',1,'tournamentSize',1,'offspringCount',1,'maxGenerations',1));
+one=runGSGeneticAlgorithm(single,@mock,struct('populationSize',1,'tournamentSize',1,'offspringCount',1,'maxGenerations',1,'localSearchEvaluations',0));
 assert(numel(one.population)==1 && one.stats.uniqueEvaluationCount==1 && one.stats.cacheHitCount==1);
 % Invalid evaluator output fails explicitly; infeasible sentinel is normalized.
 [invalid,~]=gaCreateEvaluator(m,@(~)struct());

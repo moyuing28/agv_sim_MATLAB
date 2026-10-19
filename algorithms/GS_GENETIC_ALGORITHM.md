@@ -1,9 +1,10 @@
 # GS genetic algorithm (stage 2)
 
-This is the genetic component of a future traditional Memetic Algorithm.
-There is no local search, global evaluation budget, stagnation stop, main.m
-integration or formal optimization experiment in this stage. FCFS and the
-simulator remain unchanged.
+This documents the stage-2 genetic component. Stage 3 now extends the same
+loop with optional local search, a shared budget and stopping controls; see
+[GS_MEMETIC_ALGORITHM.md](GS_MEMETIC_ALGORITHM.md) for current interfaces,
+defaults and accounting. main.m integration and formal optimization experiments
+remain outside scope. FCFS and the simulator remain unchanged.
 
 ## Interfaces
 
@@ -82,11 +83,13 @@ One cache per run stores the complete evaluated candidate under its canonical
 key. A hit returns it without evaluator invocation. `candidateGeneratedCount`
 counts accepted initial/offspring GS sent to the cache, including duplicates;
 `uniqueEvaluationCount` counts evaluator calls and `cacheHitCount` counts hits.
-For a completed run their sum equals candidateGeneratedCount, which equals
-populationSize + maxGenerations * offspringCount. Initialization's raw
+For a completed run their sum equals candidateGeneratedCount. In stage-2-only
+mode, with no early termination, it equals populationSize + maxGenerations *
+offspringCount. Initialization's raw
 topological proposals are separately recorded as initializationProposalCount;
 rejected operator proposals are recorded separately too. These counts are
-not a global budget. History includes generation 0, best metrics/key,
+historical stage-2 accounting; the stage-3 shared budget now limits new calls.
+History includes generation 0, best metrics/key,
 population keys and cumulative cache statistics.
 
 ## Testing and future use

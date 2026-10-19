@@ -50,7 +50,7 @@ for key=keys'
   after=inventory;
   after.CargoID(inventoryMarks==outerStation)="";
   after.CargoID(inventoryMarks==targetStation)=outerID;
-  validateNoHoleState(after,data.lanes);
+  validateNoHoleState(after,data.lanes,[outerStation;targetStation]);
  end
  laneRows=slotKeys==key;
  remaining=sum(ismember(slotMarks(laneRows),state.slotMarks(state.occupancy~="")))-1;
@@ -68,11 +68,11 @@ if nearestOnly && ~isempty(candidates)
  end
  % Initial global No-hole, live outer source and a fixed next compact target
  % in another Lane guarantee compactness for every prequalified trial. Still
- % perform the original full check for the winner; errors propagate as before.
+ % recheck every changed Lane for the winner; errors propagate as before.
  after=inventory;
  after.CargoID(inventoryMarks==selected.SourceStation)="";
  after.CargoID(inventoryMarks==targetStation)=selected.CargoID;
- validateNoHoleState(after,data.lanes);
+ validateNoHoleState(after,data.lanes,[selected.SourceStation;targetStation]);
  candidates=selected;
 end
 if ~isempty(candidates), reason=""; end

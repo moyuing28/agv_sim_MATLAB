@@ -1,13 +1,28 @@
-function validateNoHoleState(cargo,lanes)
+function validateNoHoleState(cargo,lanes,changedStationMarks)
 %VALIDATENOHOLESTATE Require compact storage from deepest Slot to entrance.
 % cargo must contain each Slot once and normalized string CargoID values.
 % Only StationMark/CargoID are needed, so current Slot tables can be reused.
 % Work on columns/row indices; every supplied storage Lane is still checked.
+% Optional scope is ONLY for a trial whose original inventory was just fully
+% validated, with unchanged map/mapping and CargoID writes only at these Slots.
+% Derive every affected Lane from actual station membership (including shared
+% marks), preserving map Lane order and the original validation/error body.
+% Uncertain/unsupported scope metadata falls back to the two-argument behavior.
 slotRows=find(lanes.StationType=="Slot");
 pocketKeys=lanes.PocketKey(slotRows);
 keys=unique(pocketKeys,'stable');
 if isempty(keys), return; end
 sequences=lanes.Sequence(slotRows); stationMarks=lanes.StationMark(slotRows);
+if nargin>2 && isa(stationMarks,'double') && isreal(stationMarks) && iscolumn(stationMarks) && ...
+ isstring(pocketKeys) && iscolumn(pocketKeys) && all(~ismissing(pocketKeys)) && ...
+ isa(changedStationMarks,'double') && isreal(changedStationMarks) && ...
+ isvector(changedStationMarks) && ~isempty(changedStationMarks)
+ changedStationMarks=changedStationMarks(:);
+ if all(ismember(changedStationMarks,stationMarks))
+  changedKeys=pocketKeys(ismember(stationMarks,changedStationMarks));
+  keys=keys(ismember(keys,changedKeys));
+ end
+end
 cargoMarks=cargo.StationMark; cargoIDs=cargo.CargoID;
 for k=1:numel(keys)
  rows=find(pocketKeys==keys(k));

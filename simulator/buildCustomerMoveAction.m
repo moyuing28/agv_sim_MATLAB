@@ -34,7 +34,8 @@ inventory=table(state.slotMarks(:),state.occupancy(:),'VariableNames',{'StationM
 validateNoHoleState(inventory,data.lanes);
 inventory.CargoID(inventory.StationMark==source)="";
 inventory.CargoID(inventory.StationMark==drop)=task.CargoID;
-validateNoHoleState(inventory,data.lanes);
+% The preceding full check proved the original inventory; only these Slots changed.
+validateNoHoleState(inventory,data.lanes,[source;drop]);
 action.SourceStation=source; action.SourcePocketKey=fresh.SourcePocketKey; action.SourceSequence=outer.Sequence;
 action.TargetPocketKey=fresh.TargetPocketKey; action.TargetSequence=seq;
 action.LoadedDistance=distance; action.IsFeasible=true; action.Reason="Source and Target ready";

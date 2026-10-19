@@ -41,7 +41,7 @@ for key=sort(unique(slotKeys))'
   after=inventory;
   after.CargoID(inventoryMarks==sourceStation)="";
   after.CargoID(inventoryMarks==drop)=cargoID;
-  validateNoHoleState(after,data.lanes);
+  validateNoHoleState(after,data.lanes,[sourceStation;drop]);
  end
  laneRows=slotKeys==key;
  remaining=sum(ismember(slotMarks(laneRows),state.slotMarks(state.occupancy=="")))-1;
@@ -52,12 +52,12 @@ if nearestOnly && ~isempty(candidates)
  ordered=sortrows(candidates,{'LoadedDistance','PocketKey','DropStation'});
  % Source is the outer cargo; each destination is the next compact Slot in
  % a different Lane. With the initial global No-hole check, every such trial
- % preserves compactness. Still perform the original full validation before
- % returning the first candidate; validation errors must propagate, not skip.
+ % preserves compactness. The original inventory was globally validated above;
+ % recheck every changed Lane before returning, propagating validation errors.
  after=inventory;
  after.CargoID(inventoryMarks==sourceStation)="";
  after.CargoID(inventoryMarks==ordered.DropStation(1))=cargoID;
- validateNoHoleState(after,data.lanes);
+ validateNoHoleState(after,data.lanes,[sourceStation;ordered.DropStation(1)]);
  candidates=ordered(1,:);
 end
 end

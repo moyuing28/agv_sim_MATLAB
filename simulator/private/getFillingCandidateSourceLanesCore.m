@@ -29,6 +29,17 @@ targetKey=target.PocketKey; targetSequence=target.Sequence;
 % Reuse read-only columns only within this invocation. Optional columns are
 % loaded at their first original use so empty/error paths stay unchanged.
 haveCargoIDs=false; haveCargoStatus=false; haveNames=false;
+% Standard nearest-only calls need the nearest row plus the first eligible
+% Cooperation row, not a table of every prequalified source. Other schemas
+% retain the original table conversion, selection and error order.
+keepBest=isequal(nearestOnly,true) && isstring(slotKeys) && ...
+ isa(slotMarks,'double') && isreal(slotMarks) && isfield(data,'distanceMatrix') && ...
+ isa(data.distanceMatrix,'double') && isreal(data.distanceMatrix) && ...
+ isstruct(assessment) && isscalar(assessment) && ...
+ all(isfield(assessment,{'SourceAction','SourceActionCargoID'})) && ...
+ isstring(assessment.SourceAction) && isscalar(assessment.SourceAction) && ...
+ isstring(assessment.SourceActionCargoID) && isscalar(assessment.SourceActionCargoID);
+bestRow=cell(0,10); cooperationRow=cell(0,10); bestDistance=Inf;
 for key=keys'
  if key==targetKey, continue; end
  [outerID,outerStation,outerSequence,hasOuter]=getOuterCargoValues(key,state,data);
@@ -54,17 +65,39 @@ for key=keys'
  end
  laneRows=slotKeys==key;
  remaining=sum(ismember(slotMarks(laneRows),state.slotMarks(state.occupancy~="")))-1;
- if ~haveNames, slotNames=data.lanes.PocketName(isSlot); haveNames=true; end
- candidates(end+1,:)={key,slotNames(find(laneRows,1)),outerID,outerStation,outerSequence, ...
-  targetStation,targetKey,targetSequence,distance,remaining}; %#ok<AGROW>
+ if ~haveNames
+  slotNames=data.lanes.PocketName(isSlot); haveNames=true;
+  keepBest=keepBest && isstring(slotNames);
+ end
+ row={key,slotNames(find(laneRows,1)),outerID,outerStation,outerSequence, ...
+  targetStation,targetKey,targetSequence,distance,remaining};
+ if keepBest
+  % Unique keys are visited in lexical order with one outer source per key.
+  % Equal distances retain the earlier key; no same-key station tie exists.
+  if isempty(bestRow) || distance<bestDistance
+   bestRow=row; bestDistance=distance;
+  end
+  if assessment.SourceAction=="R_SOURCE" && isempty(cooperationRow) && ...
+   outerID==assessment.SourceActionCargoID
+   cooperationRow=row; % Same first eligible match as the original find(...,1).
+  end
+ else
+  candidates(end+1,:)=row; %#ok<AGROW>
+ end
 end
-if nearestOnly && ~isempty(candidates)
+if nearestOnly && (~isempty(candidates) || ~isempty(bestRow))
  % Match the baseline plus Cooperation override before constructing a trial.
  % Only prequalified ordinary cargo can receive the blocker preference.
- selected=selectFillingSourceLaneBaseline(candidates);
- if assessment.SourceAction=="R_SOURCE"
-  hit=find(candidates.CargoID==assessment.SourceActionCargoID,1);
-  if ~isempty(hit), selected=candidates(hit,:); end
+ if keepBest
+  if ~isempty(cooperationRow), bestRow=cooperationRow; end
+  candidates(end+1,:)=bestRow; % Preserve the public typed table schema.
+  selected=candidates;
+ else
+  selected=selectFillingSourceLaneBaseline(candidates);
+  if assessment.SourceAction=="R_SOURCE"
+   hit=find(candidates.CargoID==assessment.SourceActionCargoID,1);
+   if ~isempty(hit), selected=candidates(hit,:); end
+  end
  end
  % Initial global No-hole, live outer source and a fixed next compact target
  % in another Lane guarantee compactness for every prequalified trial. Still

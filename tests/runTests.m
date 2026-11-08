@@ -29,6 +29,7 @@ testTargetConstraints();
 testRelocationActions();
 testRelocationNearestCandidate();
 testFillingActions();
+testFillingNearestCandidate();
 testReadyActions();
 testRuntimeExecution();
 testRuntimeFinalization();

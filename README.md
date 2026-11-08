@@ -60,6 +60,12 @@ P4.2c2 将 `assessCustomerTask` 内的源/目标货位查询和深处货位查�
 仍从本次调用的实时 occupancy 读取，包括同 Lane 假设 Pickup 后的状态。无索引、旧索引、
 非标准地图及共享站点的歧义检查保留原路径，不缓存 assessment 或动态合法性。
 
+P4.2c3 仅优化 Filling 的 `nearestOnly=true` 候选记录：标准类型下仍检查全部源 Lane，
+计算全部候选属性，但只保留最近合法候选和第一个合格的父任务 Source blocker 候选。
+最终按原 Cooperation 规则优先选 blocker，否则选最近候选，并写入一行原类型 table。
+等距离保留字符串 SourcePocketKey 顺序；完整候选接口、兼容类型路径、实时重评、
+获选搬运的 No-hole 校验及 Builder 的合作规则保持不变。
+
 ### Customer Task assessment（阶段 3 / v3.1）
 
 `a = assessCustomerTask(task,data,state,customerTasks)` 是只读评估。第四个参数为完整 Customer Task table；省略时使用 `state.customerTasks`，再省略则只知道当前单条任务，无法识别其他 Future/Completed Cargo。任务目录保留原有 TaskID（不作行索引）；实时 `state.taskStatus` 按目录行顺序覆盖目录 Status，未提供实时状态时使用 Status，默认 Pending。`simulateSchedule` 仅在初始化时附加目录，未改主循环；尚不执行任何准备 Action。

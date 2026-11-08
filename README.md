@@ -54,6 +54,12 @@ P4.2c1 仅调整 Relocation 的 `nearestOnly=true` 候选记录：标准字符�
 因此距离相同时保留先出现的项与原 LoadedDistance/PocketKey/DropStation 排序一致。
 完整候选接口、非标准类型的兼容路径及获选搬运的 No-hole 检查保留；Filling 未修改。
 
+P4.2c2 将 `assessCustomerTask` 内的源/目标货位查询和深处货位查询接入同一静态索引。
+索引增加唯一 StationMark 的 Lane/Slot 位置，以及保留原地图同深度行顺序的降序位置。
+评估只读出所需几何标量，不再为这些查询反复构造、筛选和排序地图 table；深处货物
+仍从本次调用的实时 occupancy 读取，包括同 Lane 假设 Pickup 后的状态。无索引、旧索引、
+非标准地图及共享站点的歧义检查保留原路径，不缓存 assessment 或动态合法性。
+
 ### Customer Task assessment（阶段 3 / v3.1）
 
 `a = assessCustomerTask(task,data,state,customerTasks)` 是只读评估。第四个参数为完整 Customer Task table；省略时使用 `state.customerTasks`，再省略则只知道当前单条任务，无法识别其他 Future/Completed Cargo。任务目录保留原有 TaskID（不作行索引）；实时 `state.taskStatus` 按目录行顺序覆盖目录 Status，未提供实时状态时使用 Status，默认 Pending。`simulateSchedule` 仅在初始化时附加目录，未改主循环；尚不执行任何准备 Action。

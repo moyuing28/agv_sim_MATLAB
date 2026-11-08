@@ -24,6 +24,7 @@ addpath(fullfile(projectRoot,'tests'));
 testLaneQueryIndex();
 testReadySnapshotAssessment();
 testCustomerAssessment();
+testAssessmentIndex();
 testTargetConstraints();
 testRelocationActions();
 testRelocationNearestCandidate();

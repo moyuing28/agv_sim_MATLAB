@@ -12,13 +12,21 @@ if ~isstring(keys) || ~isstring(types) || ~isstring(names) || ~isnumeric(sequenc
  size(sequences,2)~=1 || size(marks,2)~=1 || size(names,2)~=1
  return;
 end
-isSlot=types=="Slot"; laneKeys=unique(keys(isSlot));
+isSlot=types=="Slot"; laneKeys=unique(keys(isSlot)); accessMarks=unique(marks(isSlot));
 index=struct('keys',laneKeys,'slots',{cell(numel(laneKeys),1)}, ...
  'occupancyRows',{cell(numel(laneKeys),1)},'slotMarks',slotMarks, ...
- 'accessMarks',unique(marks(isSlot)),'access',{cell(numel(unique(marks(isSlot))),1)});
+ 'accessMarks',accessMarks,'access',{cell(numel(accessMarks),1)}, ...
+ 'stationLane',zeros(numel(accessMarks),1),'stationSlot',zeros(numel(accessMarks),1), ...
+ 'descendingOrder',{cell(numel(laneKeys),1)});
 for k=1:numel(laneKeys)
  rows=find(isSlot & keys==laneKeys(k));
- [~,order]=sort(sequences(rows)); rows=rows(order);
+ [~,order]=sort(sequences(rows));
+ [~,descending]=sort(sequences(rows),'descend');
+ % Both sorts start in map row order: equal Sequences retain the original
+ % stable descending order, which is not generally flipud(ascending).
+ positions=zeros(numel(rows),1); positions(order)=(1:numel(rows))';
+ index.descendingOrder{k}=positions(descending);
+ rows=rows(order);
  slots=struct('PocketKey',keys(rows),'StationType',types(rows), ...
   'Sequence',sequences(rows),'StationMark',marks(rows),'PocketName',names(rows));
  index.slots{k}=slots;
@@ -28,6 +36,12 @@ for k=1:numel(laneKeys)
 end
 for k=1:numel(index.accessMarks)
  membership=find(isSlot & marks==index.accessMarks(k)); access=false(size(marks));
+ % A shared StationMark must retain the caller's original ambiguity check.
+ if numel(membership)==1 && any(laneKeys==keys(membership))
+  lane=find(laneKeys==keys(membership),1);
+  index.stationLane(k)=lane;
+  index.stationSlot(k)=find(index.slots{lane}.StationMark==index.accessMarks(k),1);
+ end
  for row=membership'
   access=access | (isSlot & keys==keys(row) & sequences>sequences(row));
  end

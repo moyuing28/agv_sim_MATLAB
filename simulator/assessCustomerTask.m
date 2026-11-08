@@ -45,10 +45,8 @@ if a.SourceStation==a.TargetStation
  % The cargo is already correctly placed. Do not clear it as an R_TARGET or
  % apply the ordinary same-Lane post-pickup/R_SELF logic.
  [station,~,id]=getLaneFrontier(a.TargetPocketKey,state,data);
- slots=data.lanes(data.lanes.StationType=="Slot" & data.lanes.PocketKey==a.TargetPocketKey & data.lanes.Sequence<a.TargetSequence,:);
- slots=sortrows(slots,'Sequence','descend');
- [~,loc]=ismember(slots.StationMark,state.slotMarks);
- ids=state.occupancy(loc); protected=find(ismember(ids,future),1);
+ ids=deeperCargo(a.TargetPocketKey,a.TargetSequence,data,state);
+ protected=find(ismember(ids,future),1);
  if ~isempty(protected)
   protect(id,completed);
   a.TargetAction="R_FUTURE"; a.TargetActionCargoID=id; a.TargetActionStation=station;
@@ -98,9 +96,7 @@ if a.TargetSequence<=frontier
  a.TargetAction="R_TARGET"; a.TargetActionCargoID=id; a.TargetActionStation=station;
  a.TargetActionReason="TargetClearing"; return;
 end
-slots=data.lanes(data.lanes.StationType=="Slot" & data.lanes.PocketKey==a.TargetPocketKey & data.lanes.Sequence<a.TargetSequence,:);
-slots=sortrows(slots,'Sequence','descend');
-[~,loc]=ismember(slots.StationMark,state.slotMarks); ids=state.occupancy(loc);
+ids=deeperCargo(a.TargetPocketKey,a.TargetSequence,data,state);
 protected=find(ismember(ids,future),1);
 if ~isempty(protected)
  protect(id,completed);
@@ -118,8 +114,32 @@ else
 end
 end
 function slot=slotAt(station,data)
+if isfield(data,'runtimeLaneIndex') && isstruct(data.runtimeLaneIndex) && ...
+ all(isfield(data.runtimeLaneIndex,{'stationLane','stationSlot'}))
+ index=data.runtimeLaneIndex; row=find(index.accessMarks==station,1);
+ if ~isempty(row) && index.stationLane(row)>0
+  slots=index.slots{index.stationLane(row)}; position=index.stationSlot(row);
+  slot=struct('PocketKey',slots.PocketKey(position),'Sequence',slots.Sequence(position));
+  return;
+ end
+end
+% No index, missing Station or shared membership: preserve original errors.
 slot=data.lanes(data.lanes.StationType=="Slot" & data.lanes.StationMark==station,:);
 assert(height(slot)==1,'AGV:SlotState','Station %g must identify one real Slot membership.',station);
+end
+function ids=deeperCargo(key,sequence,data,state)
+if isfield(data,'runtimeLaneIndex') && isstruct(data.runtimeLaneIndex) && ...
+ isfield(data.runtimeLaneIndex,'descendingOrder')
+ index=data.runtimeLaneIndex; lane=find(index.keys==key,1);
+ slots=index.slots{lane}; rows=index.descendingOrder{lane};
+ rows=rows(slots.Sequence(rows)<sequence); marks=slots.StationMark(rows);
+else
+ slots=data.lanes(data.lanes.StationType=="Slot" & data.lanes.PocketKey==key & data.lanes.Sequence<sequence,:);
+ slots=sortrows(slots,'Sequence','descend'); marks=slots.StationMark;
+end
+% Always map/read this call's live state, including hypothetical same-Lane
+% pickup inventories and callers with a reordered Slot-state mapping.
+[~,loc]=ismember(marks,state.slotMarks); ids=state.occupancy(loc);
 end
 function protect(id,completed)
 assert(~ismember(id,completed),'AGV:CompletedCargoBlocked','Completed customer cargo %s blocks preparation and cannot be relocated.',char(id));

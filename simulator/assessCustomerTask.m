@@ -59,11 +59,11 @@ if a.SourceStation==a.TargetStation
  a.MainActionCargoID=task.CargoID; a.MainActionStation=a.SourceStation;
  a.Reason="Already at final target; eligible task may Finalize"; return;
 end
-outer=getOuterCargo(source.PocketKey,state,data);
-a.SourceReady=outer.CargoID==task.CargoID;
+[outerID,outerStation]=getOuterCargoValues(source.PocketKey,state,data);
+a.SourceReady=outerID==task.CargoID;
 if ~a.SourceReady
- protect(outer.CargoID,completed);
- a.SourceAction="R_SOURCE"; a.SourceActionCargoID=outer.CargoID; a.SourceActionStation=outer.StationMark;
+ protect(outerID,completed);
+ a.SourceAction="R_SOURCE"; a.SourceActionCargoID=outerID; a.SourceActionStation=outerStation;
 end
 if a.SourceTargetSameLane
  if ~a.SourceReady

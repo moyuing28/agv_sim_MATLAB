@@ -1,6 +1,13 @@
 function [frontierStation,frontierSequence,cargoID] = getLaneFrontier(pocketKey,state,data)
 %GETLANEFRONTIER Outermost occupied Slot, computed from live occupancy.
 % Empty Lane: NaN, -1, "". Unknown/non-storage PocketKey: AGV:LaneKey.
+indexed=isfield(data,'runtimeLaneIndex') && isstruct(data.runtimeLaneIndex);
+if indexed
+ index=data.runtimeLaneIndex;
+ lane=find(index.keys==string(pocketKey),1);
+ assert(~isempty(lane),'AGV:LaneKey','PocketKey %s has no Slot Lane.',char(string(pocketKey)));
+ slots=index.slots{lane}; columnPath=true;
+else
 keys=data.lanes.PocketKey; types=data.lanes.StationType;
 rows=find(keys==string(pocketKey) & types=="Slot");
 assert(~isempty(rows),'AGV:LaneKey','PocketKey %s has no Slot Lane.',char(string(pocketKey)));
@@ -21,6 +28,7 @@ else
  % Preserve the original Table behavior/errors for nonstandard column schemas.
  slots=sortrows(data.lanes(rows,:),'Sequence');
 end
+end
 assert(numel(state.slotMarks)==numel(state.occupancy) && ...
  numel(unique(state.slotMarks))==numel(state.slotMarks), ...
  'AGV:SlotState','Slot marks and occupancy must form a unique one-to-one mapping.');
@@ -30,7 +38,11 @@ else
  inventory=table(state.slotMarks(:),state.occupancy(:),'VariableNames',{'StationMark','CargoID'});
 end
 validateNoHoleState(inventory,slots);
-[~,idx]=ismember(slots.StationMark,inventory.StationMark);
+if indexed && isequal(state.slotMarks,index.slotMarks) && ~isempty(index.occupancyRows{lane})
+ idx=index.occupancyRows{lane};
+else
+ [~,idx]=ismember(slots.StationMark,inventory.StationMark);
+end
 ids=inventory.CargoID(idx);
 outer=find(ids~="",1,'last');
 frontierStation=NaN; frontierSequence=-1; cargoID="";

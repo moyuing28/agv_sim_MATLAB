@@ -30,6 +30,18 @@ Lane 状态查询接口（阶段 2）均为独立函数，不缓存 frontier，�
 
 Lane 查询遇到内部空洞时报 `AGV:InternalHole`。
 
+P4.2a 的静态查询索引：`simulateSchedule` 完成原有输入校验后，每次调用通过
+`buildLaneQueryIndex` 建立本次仿真私有的 `data.runtimeLaneIndex`，保存各 Lane 按
+Sequence 排列的 Slot 列、对应库存行及各 Slot 外侧访问站点。索引只保存几何关系，
+不保存 occupancy、frontier、任务 assessment、预约或 Lane Lock；Pickup/Dropoff 后
+查询仍读取实时状态，并执行原有 No-hole 检查。索引不写入 `state` 或结果，不使用
+persistent/global 缓存；入口总是重建，不能复用调用者旧输入的索引。没有索引或
+不支持的列类型走原查询路径，库存行顺序改变时重新匹配位置。
+
+内部高频调用使用 `getOuterCargoValues` 返回货物 ID、站点、深度及是否存在货物，
+避免一行/空行 table 包装；公开的 `getOuterCargo` 仍保持原来的 table 返回格式。
+ReadySet 重建时机、assessment 重评、Relocation/Filling 选择、锁和预约规则均未改变。
+
 ### Customer Task assessment（阶段 3 / v3.1）
 
 `a = assessCustomerTask(task,data,state,customerTasks)` 是只读评估。第四个参数为完整 Customer Task table；省略时使用 `state.customerTasks`，再省略则只知道当前单条任务，无法识别其他 Future/Completed Cargo。任务目录保留原有 TaskID（不作行索引）；实时 `state.taskStatus` 按目录行顺序覆盖目录 Status，未提供实时状态时使用 Status，默认 Pending。`simulateSchedule` 仅在初始化时附加目录，未改主循环；尚不执行任何准备 Action。

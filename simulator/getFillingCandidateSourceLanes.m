@@ -29,11 +29,9 @@ targetKey=target.PocketKey; targetSequence=target.Sequence;
 haveCargoIDs=false; haveCargoStatus=false; haveNames=false;
 for key=keys'
  if key==targetKey, continue; end
- outer=getOuterCargo(key,state,data);
- if isempty(outer), continue; end
- outerID=outer.CargoID;
+ [outerID,outerStation,outerSequence,hasOuter]=getOuterCargoValues(key,state,data);
+ if ~hasOuter, continue; end
  if ismember(outerID,customerCargo), continue; end
- outerStation=outer.StationMark; outerSequence=outer.Sequence;
  if ~haveCargoIDs, cargoIDs=state.cargos.CargoID; haveCargoIDs=true; end
  c=find(cargoIDs==outerID);
  if numel(c)~=1, continue; end

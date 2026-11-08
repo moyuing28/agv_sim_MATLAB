@@ -14,8 +14,8 @@ station=getCargoCurrentStation(cargoID,state);
 assert(isfinite(station),'AGV:RelocationCargoNotAccessible','Relocation cargo %s is not AtSlot.',char(cargoID));
 source=data.lanes(data.lanes.StationType=="Slot" & data.lanes.StationMark==station,:);
 assert(height(source)==1,'AGV:SlotState','Relocation source must identify one real Slot.');
-outer=getOuterCargo(source.PocketKey,state,data);
-assert(~isempty(outer) && outer.CargoID==cargoID,'AGV:RelocationCargoNotAccessible', ...
+[outerID,~,~,hasOuter]=getOuterCargoValues(source.PocketKey,state,data);
+assert(hasOuter && outerID==cargoID,'AGV:RelocationCargoNotAccessible', ...
  'Cargo %s is not the current outer cargo of PocketKey %s.',char(cargoID),char(source.PocketKey));
 assert(sum(state.occupancy==cargoID)==1 && state.occupancy(state.slotMarks==station)==cargoID, ...
  'AGV:CargoState','Relocation cargo location and occupancy disagree.');

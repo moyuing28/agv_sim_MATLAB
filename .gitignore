@@ -1,6 +1,9 @@
 # Generated simulation outputs (main.m recreates this directory)
 /results/
 
+# Local audit scripts, profiler scratch files and isolated regression copies.
+/.tmp/
+
 # Generated animation pages, even when exported outside results.
 *_animation.html
 animation_demo.html

@@ -21,6 +21,7 @@ fixtureDir=tempname(testCfg.resultsDir); mkdir(fixtureDir); fixtureCleanup=onCle
 testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fixtureDir,'tasks.csv');
 testLaneHelpers(testData,blank);
 addpath(fullfile(projectRoot,'tests'));
+testLaneQueryIndex();
 testCustomerAssessment();
 testTargetConstraints();
 testRelocationActions();

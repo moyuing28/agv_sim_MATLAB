@@ -21,6 +21,9 @@ try
 catch err
  result.failureReason=string(err.message); return;
 end
+% Geometry only: private to this invocation, never carried in output state.
+% Rebuild even if caller supplied an index, so changed inputs cannot reuse it.
+data.runtimeLaneIndex=buildLaneQueryIndex(data.lanes,data.cargoInitial.StationMark);
 state=initializeCargoState(data); state.taskStatus=result.taskStatus; state.customerTasks=tasks;
 state.taskCompletionTime=nan(n,1);
 keys=sort(unique(data.lanes.PocketKey(data.lanes.StationType=="Slot")));

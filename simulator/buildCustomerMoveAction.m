@@ -11,8 +11,8 @@ fresh=assessCustomerTask(task,data,state); validateRuntimeAssessment(fresh);
 if ~assessment.CustomerMoveReady || ~fresh.CustomerMoveReady, return; end
 source=getCargoCurrentStation(task.CargoID,state);
 if ~isfinite(source), return; end
-outer=getOuterCargo(fresh.SourcePocketKey,state,data);
-if isempty(outer) || outer.CargoID~=task.CargoID || outer.StationMark~=source, return; end
+[outerID,outerStation,outerSequence,hasOuter]=getOuterCargoValues(fresh.SourcePocketKey,state,data);
+if ~hasOuter || outerID~=task.CargoID || outerStation~=source, return; end
 if source==task.DropoffStation
  action.Reason="Already at final target requires FINALIZE, not a Move"; return;
 end
@@ -36,7 +36,7 @@ inventory.CargoID(inventory.StationMark==source)="";
 inventory.CargoID(inventory.StationMark==drop)=task.CargoID;
 % The preceding full check proved the original inventory; only these Slots changed.
 validateNoHoleState(inventory,data.lanes,[source;drop]);
-action.SourceStation=source; action.SourcePocketKey=fresh.SourcePocketKey; action.SourceSequence=outer.Sequence;
+action.SourceStation=source; action.SourcePocketKey=fresh.SourcePocketKey; action.SourceSequence=outerSequence;
 action.TargetPocketKey=fresh.TargetPocketKey; action.TargetSequence=seq;
 action.LoadedDistance=distance; action.IsFeasible=true; action.Reason="Source and Target ready";
 end

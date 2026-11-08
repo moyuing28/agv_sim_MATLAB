@@ -5,6 +5,13 @@
 %
 % Notes: Input CSVs are read-only; no automatic obstacle relocation.
 function outer = getSlotAccessStations(station,data)
+if isfield(data,'runtimeLaneIndex') && isstruct(data.runtimeLaneIndex) && isscalar(station)
+ index=data.runtimeLaneIndex;
+ row=find(index.accessMarks==station,1);
+ outer=zeros(0,1);
+ if ~isempty(row), outer=index.access{row}; end
+ return;
+end
 isSlot=data.lanes.StationType=="Slot";
 marks=data.lanes.StationMark; keys=data.lanes.PocketKey; sequences=data.lanes.Sequence;
 membership=find(isSlot & marks==station);

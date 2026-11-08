@@ -24,6 +24,12 @@ if any(state.reservedBy(idx)~=0), return; end
 % Enumerate live drop/access/distance information before ordering. In nearest
 % mode defer hypothetical inventories until the exact baseline order is known.
 haveNames=false;
+% A supported nearest-only call needs one row, not a growing candidate table.
+% Other schemas retain the original table assignment/conversion behavior.
+keepBest=isequal(nearestOnly,true) && isstring(slotKeys) && ...
+ isa(slotMarks,'double') && isreal(slotMarks) && isfield(data,'distanceMatrix') && ...
+ isa(data.distanceMatrix,'double') && isreal(data.distanceMatrix);
+bestRow=cell(0,7); bestDistance=Inf;
 for key=sort(unique(slotKeys))'
  if key==sourceKey, continue; end
  isParent=key==parentKey;
@@ -45,11 +51,29 @@ for key=sort(unique(slotKeys))'
  end
  laneRows=slotKeys==key;
  remaining=sum(ismember(slotMarks(laneRows),state.slotMarks(state.occupancy=="")))-1;
- if ~haveNames, slotNames=slots.PocketName; haveNames=true; end
- candidates(end+1,:)={key,slotNames(find(laneRows,1)),drop,sequence,distance,remaining,isParent}; %#ok<AGROW>
+ if ~haveNames
+  slotNames=slots.PocketName; haveNames=true;
+  keepBest=keepBest && isstring(slotNames);
+ end
+ row={key,slotNames(find(laneRows,1)),drop,sequence,distance,remaining,isParent};
+ if keepBest
+  % Unique keys are visited in the same lexical order as baseline sortrows.
+  % Each key contributes one legal drop, so an equal distance keeps the
+  % earlier key; a same-key DropStation tie cannot arise in this enumeration.
+  if isempty(bestRow) || distance<bestDistance
+   bestRow=row; bestDistance=distance;
+  end
+ else
+  candidates(end+1,:)=row; %#ok<AGROW>
+ end
 end
-if nearestOnly && ~isempty(candidates)
- ordered=sortrows(candidates,{'LoadedDistance','PocketKey','DropStation'});
+if nearestOnly && (~isempty(candidates) || ~isempty(bestRow))
+ if keepBest
+  candidates(end+1,:)=bestRow; % Preserve the public table schema/conversions.
+  ordered=candidates;
+ else
+  ordered=sortrows(candidates,{'LoadedDistance','PocketKey','DropStation'});
+ end
  % Source is the outer cargo; each destination is the next compact Slot in
  % a different Lane. With the initial global No-hole check, every such trial
  % preserves compactness. The original inventory was globally validated above;

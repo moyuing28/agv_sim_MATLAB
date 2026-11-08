@@ -48,6 +48,11 @@ Relocation、Filling Builder 以及 Filling 查询接口仍重新评估当前状
 提供当前任务刚算出的评估值；调用位置和其余资源、源端、目标端、No-hole 检查保留。
 评估提供函数只在当前调用栈内使用，不存入 state、data、ActionPayload 或跨事件缓存。
 同 Lane 假设 Pickup 仍由 `assessCustomerTask` 独立计算；FINALIZE 防护和重建时机不变。
+P4.2c1 仅调整 Relocation 的 `nearestOnly=true` 候选记录：标准字符串/双精度地图
+仍按原顺序检查全部 Lane、计算全部候选属性，只在变量中保留当前最佳项，最后写入
+一行兼容 table。候选 Lane 的 PocketKey 已按字符串升序且每 Lane 只有一个 legal drop，
+因此距离相同时保留先出现的项与原 LoadedDistance/PocketKey/DropStation 排序一致。
+完整候选接口、非标准类型的兼容路径及获选搬运的 No-hole 检查保留；Filling 未修改。
 
 ### Customer Task assessment（阶段 3 / v3.1）
 

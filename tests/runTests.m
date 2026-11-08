@@ -26,6 +26,7 @@ testReadySnapshotAssessment();
 testCustomerAssessment();
 testTargetConstraints();
 testRelocationActions();
+testRelocationNearestCandidate();
 testFillingActions();
 testReadyActions();
 testRuntimeExecution();

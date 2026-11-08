@@ -22,6 +22,7 @@ testCfg.cargoFile=fullfile(fixtureDir,'cargo.csv'); testCfg.taskFile=fullfile(fi
 testLaneHelpers(testData,blank);
 addpath(fullfile(projectRoot,'tests'));
 testLaneQueryIndex();
+testReadySnapshotAssessment();
 testCustomerAssessment();
 testTargetConstraints();
 testRelocationActions();

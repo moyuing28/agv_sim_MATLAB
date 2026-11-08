@@ -40,7 +40,14 @@ persistent/global 缓存；入口总是重建，不能复用调用者旧输入�
 
 内部高频调用使用 `getOuterCargoValues` 返回货物 ID、站点、深度及是否存在货物，
 避免一行/空行 table 包装；公开的 `getOuterCargo` 仍保持原来的 table 返回格式。
-ReadySet 重建时机、assessment 重评、Relocation/Filling 选择、锁和预约规则均未改变。
+P4.2a 没有改变 ReadySet 重建时机、assessment 重评、Relocation/Filling 选择、锁和预约规则。
+
+P4.2b 在同一次 `buildReadyActions` 调用内复用刚生成的 assessment。公开的 Customer、
+Relocation、Filling Builder 以及 Filling 查询接口仍重新评估当前状态，防止过期请求。
+两种入口共用 `simulator/private/` 中的构造逻辑：公开入口提供即时评估函数，ReadySet
+提供当前任务刚算出的评估值；调用位置和其余资源、源端、目标端、No-hole 检查保留。
+评估提供函数只在当前调用栈内使用，不存入 state、data、ActionPayload 或跨事件缓存。
+同 Lane 假设 Pickup 仍由 `assessCustomerTask` 独立计算；FINALIZE 防护和重建时机不变。
 
 ### Customer Task assessment（阶段 3 / v3.1）
 

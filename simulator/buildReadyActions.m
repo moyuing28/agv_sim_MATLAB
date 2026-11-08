@@ -44,18 +44,18 @@ for rank=1:n
   ready=append(ready,buildFinalizeAction(task,a,snapshot,data),rank,"MAIN",0); continue;
  end
  if a.CustomerMoveReady
-  ready=append(ready,buildCustomerMoveAction(task,a,snapshot,data),rank,"MAIN",0); continue;
+  ready=append(ready,buildCustomerMoveActionCore(task,a,snapshot,data,@()a),rank,"MAIN",0); continue;
  end
  if a.MainAction=="R_SELF"
-  ready=append(ready,buildRelocationAction(task,a,"MAIN",snapshot,data),rank,"MAIN",0); continue;
+  ready=append(ready,buildRelocationActionCore(task,a,"MAIN",snapshot,data,@()a),rank,"MAIN",0); continue;
  end
  if ismember(a.TargetAction,["R_TARGET","R_FUTURE"])
-  ready=append(ready,buildRelocationAction(task,a,"TARGET",snapshot,data),rank,"TARGET",1);
+  ready=append(ready,buildRelocationActionCore(task,a,"TARGET",snapshot,data,@()a),rank,"TARGET",1);
  elseif a.TargetAction=="FILLING"
-  ready=append(ready,buildFillingAction(task,a,snapshot,data),rank,"TARGET",1);
+  ready=append(ready,buildFillingActionCore(task,a,snapshot,data,@()a),rank,"TARGET",1);
  end
  if a.SourceAction=="R_SOURCE"
-  ready=append(ready,buildRelocationAction(task,a,"SOURCE",snapshot,data),rank,"SOURCE",2);
+  ready=append(ready,buildRelocationActionCore(task,a,"SOURCE",snapshot,data,@()a),rank,"SOURCE",2);
  end
 end
 ready=normalizeReadyActions(ready);

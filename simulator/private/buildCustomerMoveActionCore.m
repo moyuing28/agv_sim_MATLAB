@@ -1,0 +1,44 @@
+function action = buildCustomerMoveActionCore(task,assessment,state,data,freshAssessment)
+% Lazy provider preserves public evaluation order; ReadySet supplies its current value.
+% Providers are call-local and must never be retained across state changes.
+%BUILDCUSTOMERMOVEACTION Read-only dynamic Customer move, never dispatches.
+assert(task.TaskID==assessment.CustomerTaskID && task.CargoID==assessment.CargoID, ...
+ 'AGV:CustomerMoveAssessment','Assessment must belong to the Customer Task.');
+validateRuntimeAssessment(assessment);
+action=struct('ActionType',"CUSTOMER_MOVE",'ParentCustomerTaskID',task.TaskID,'CustomerTaskID',task.TaskID, ...
+ 'CargoID',task.CargoID,'SourceStation',NaN,'SourcePocketKey',"",'SourceSequence',NaN, ...
+ 'TargetStation',task.DropoffStation,'TargetPocketKey',"",'TargetSequence',NaN, ...
+ 'LoadedDistance',NaN,'IsFeasible',false,'Reason',"Stale assessment",'CreatedFromSide',"MAIN");
+fresh=freshAssessment(); validateRuntimeAssessment(fresh);
+if ~assessment.CustomerMoveReady || ~fresh.CustomerMoveReady, return; end
+source=getCargoCurrentStation(task.CargoID,state);
+if ~isfinite(source), return; end
+[outerID,outerStation,outerSequence,hasOuter]=getOuterCargoValues(fresh.SourcePocketKey,state,data);
+if ~hasOuter || outerID~=task.CargoID || outerStation~=source, return; end
+if source==task.DropoffStation
+ action.Reason="Already at final target requires FINALIZE, not a Move"; return;
+end
+[drop,seq,available]=getLegalDropSlot(fresh.TargetPocketKey,state,data);
+if ~available || drop~=task.DropoffStation, return; end
+idx=find(state.slotMarks==drop);
+if numel(idx)~=1 || state.occupancy(idx)~="", return; end
+footprint=unique([source;drop;getSlotAccessStations(source,data);getSlotAccessStations(drop,data)]);
+[found,locks]=ismember(footprint,state.slotMarks);
+assert(all(found),'AGV:SlotState','Missing Customer Move access Slot.');
+if any(state.reservedBy(locks)~=0)
+ action.Reason="Customer move access Slots reserved by active actions"; return;
+end
+distance=getTravelDistance(source,drop,data);
+if ~isfinite(distance) || distance<0
+ action.Reason="Customer move loaded route is unreachable"; return;
+end
+inventory=table(state.slotMarks(:),state.occupancy(:),'VariableNames',{'StationMark','CargoID'});
+validateNoHoleState(inventory,data.lanes);
+inventory.CargoID(inventory.StationMark==source)="";
+inventory.CargoID(inventory.StationMark==drop)=task.CargoID;
+% The preceding full check proved the original inventory; only these Slots changed.
+validateNoHoleState(inventory,data.lanes,[source;drop]);
+action.SourceStation=source; action.SourcePocketKey=fresh.SourcePocketKey; action.SourceSequence=outerSequence;
+action.TargetPocketKey=fresh.TargetPocketKey; action.TargetSequence=seq;
+action.LoadedDistance=distance; action.IsFeasible=true; action.Reason="Source and Target ready";
+end
